@@ -7,7 +7,54 @@
 - ✅ 3d数据(batch,channel,deep,height,width)
 - ✅ Nd数据(batch,channel,*size)
 
+## 使用样例
+### 代码
+```python
 
+
+if __name__ == '__main__':
+    # 通用的多维度双向mamba2
+    net_n = BiMamba2(64, 128, 64).cuda()
+
+    # 定制的双向mamba2 1d, 2d, 3d
+    net1 = BiMamba2_1d(64, 128, 64).cuda()
+    net2 = BiMamba2_2d(64, 128, 64).cuda()
+    net3 = BiMamba2_3d(64, 128, 64).cuda()
+
+    # 多维度数据
+    x1 = torch.randn(1, 64, 32).cuda() # 1d
+    x2 = torch.randn(1, 64, 32, 77).cuda() # 2d
+    x3 = torch.randn(1, 64, 32, 77, 25).cuda() # 3d
+    x4 = torch.randn(1, 64, 32, 77, 25, 15).cuda() # 4d
+
+    # 测试
+    y1 = net_n(x1)
+    print(y1.shape)
+    y2 = net_n(x2)
+    print(y2.shape)
+    y3 = net_n(x3)
+    print(y3.shape)
+    y4 = net_n(x4)
+    print(y4.shape)
+
+
+    y1 = net1(x1)
+    print(y1.shape)
+    y2 = net2(x2)
+    print(y2.shape)
+    y3 = net3(x3)
+    print(y3.shape)
+```
+### 效果
+``` base
+torch.Size([1, 128, 32])
+torch.Size([1, 128, 32, 77])
+torch.Size([1, 128, 32, 77, 25])
+torch.Size([1, 128, 32, 77, 25, 15])
+torch.Size([1, 128, 32])
+torch.Size([1, 128, 32, 77])
+torch.Size([1, 128, 32, 77, 25])
+```
 ## 引用
  ```bibtex
 [1] Mamba2
