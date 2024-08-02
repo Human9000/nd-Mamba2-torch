@@ -6,7 +6,7 @@
 - ✅ 2d数据(batch,channel,height,width)
 - ✅ 3d数据(batch,channel,deep,height,width)
 - ✅ Nd数据(batch,channel,*size)
-- ✅ 支持任意版本的CUDA不需要编译
+- ✅ 有好的环境支持（纯PyTorch实现，即插即用）
   
 ## 提示
 *如果你想要更快的速度，可以将本项目中的Mamba2替换为Mamba2官方的Cuda加速实现，并按照官方要求安装各种依赖包，这不会影响本项目对多维度数据的支持*
