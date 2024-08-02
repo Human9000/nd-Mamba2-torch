@@ -1,4 +1,4 @@
-# BiMamba2 for any dim
+# BiMamba2 for any dimension
 支持任意维度的双向Mamba2的纯torch模块
 
 ## 支持的功能
