@@ -1,0 +1,2 @@
+# BiMamba2_1d_2d_3d_nd
+支持任意维度的双向Mamba2的纯torch模块
