@@ -60,6 +60,12 @@ torch.Size([1, 128, 32])
 torch.Size([1, 128, 32, 77])
 torch.Size([1, 128, 32, 77, 25])
 ```
+
+## 致谢
+
+* [Albert Gu], [Tri Dao] - authors of the Mamba-2 architecture
+* [Thomas] - author of [tommyip/mamba2-minimal], who inspired this repo
+  
 ## 引用
  ```bibtex
 [1] Mamba2
