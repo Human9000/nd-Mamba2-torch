@@ -2,10 +2,10 @@
 支持任意维度的双向Mamba2的纯torch模块
 
 ## 支持的功能
-- [x] 1d数据(batch,channel,length)
-- [x] 2d数据(batch,channel,height,width)
-- [x] 3d数据(batch,channel,deep,height,width)
-- [x] Nd数据(batch,channel,*size)
+- ✅  1d数据(batch,channel,length)
+- ✅  2d数据(batch,channel,height,width)
+- ✅ 3d数据(batch,channel,deep,height,width)
+- ✅  Nd数据(batch,channel,*size)
 
 
 ## Work this is based on
