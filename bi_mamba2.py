@@ -376,7 +376,7 @@ class BiMamba2_3d(BaseBiMaba2):
         x2 = x2.flip(1)
         x = x1 + x2
         x = self.fc_out(x)  # 调整通道数为目标通道数
-        x = rearrange(x, 'b (d h w) c -> b c h w', d=d4, h=h4, w=w4)  # 转成 2d 图片[b, d4*w4*h4, c64]
+        x = rearrange(x, 'b (d h w) c -> b c d h w', d=d4, h=h4, w=w4)  # 转成 2d 图片[b, d4*w4*h4, c64]
         x = x[:, :, :d, :h, :w]  # 截取原图大小
         return x
 
@@ -404,13 +404,35 @@ class BiMamba2(BaseBiMaba2):
         return x
 
 if __name__ == '__main__':
-    net = BiMamba2(64, 128, 64).cuda()
-    x1 = torch.randn(1, 64, 32).cuda()
-    x2 = torch.randn(1, 64, 32, 77).cuda()
-    x3 = torch.randn(1, 64, 32, 77, 25).cuda()
-    y1 = net(x1)
+    # 通用的多维度双向mamba2
+    net_n = BiMamba2(64, 128, 64).cuda()
+
+    # 定制的双向mamba2 1d, 2d, 3d
+    net1 = BiMamba2_1d(64, 128, 64).cuda()
+    net2 = BiMamba2_2d(64, 128, 64).cuda()
+    net3 = BiMamba2_3d(64, 128, 64).cuda()
+
+    # 多维度数据
+    x1 = torch.randn(1, 64, 32).cuda() # 1d
+    x2 = torch.randn(1, 64, 32, 77).cuda() # 2d
+    x3 = torch.randn(1, 64, 32, 77, 25).cuda() # 3d
+    x4 = torch.randn(1, 64, 32, 77, 25, 15).cuda() # 4d
+
+    # 测试
+    y1 = net_n(x1)
     print(y1.shape)
-    y2 = net(x2)
+    y2 = net_n(x2)
     print(y2.shape)
-    y3 = net(x3)
+    y3 = net_n(x3)
     print(y3.shape)
+    y4 = net_n(x4)
+    print(y4.shape)
+
+
+    y1 = net1(x1)
+    print(y1.shape)
+    y2 = net2(x2)
+    print(y2.shape)
+    y3 = net3(x3)
+    print(y3.shape)
+
