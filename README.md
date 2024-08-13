@@ -63,7 +63,7 @@ torch.Size([1, 128, 32, 77, 25])
 
 ## 致谢
 
-* [Albert Gu], [Tri Dao] - authors of the Mamba-2 architecture
+* [Albert Gu], [Tri Dao] [state-spaces/mamba] - authors of the Mamba-2 architecture
 * [Thomas] - author of [tommyip/mamba2-minimal], who inspired this repo
   
 ## 引用
