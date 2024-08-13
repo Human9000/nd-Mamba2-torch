@@ -305,7 +305,7 @@ def silu(x):
     """
     return x * F.sigmoid(x)
 
-class BaseBiMaba2(nn.Module):
+class BaseNdMamba2(nn.Module):
     def __init__(self, cin, cout, mamba_dim, **mamba2_args):
         super().__init__()
         assert mamba_dim % 64 == 0, "cmid 必须是64的倍数"
@@ -315,7 +315,7 @@ class BaseBiMaba2(nn.Module):
         self.fc_out = nn.Linear(mamba_dim, cout, bias=False)  # 调整通道数到cout
 
 
-class BiMamba2_1d(BaseBiMaba2):
+class NdMamba2_1d(BaseNdMamba2):
     def __init__(self, cin, cmid, cout, **mamba2_args):
         super().__init__(cin, cmid, cout, **mamba2_args)
 
@@ -334,7 +334,7 @@ class BiMamba2_1d(BaseBiMaba2):
         return x
 
 
-class BiMamba2_2d(BaseBiMaba2):
+class NdMamba2_2d(BaseNdMamba2):
     def __init__(self, cin,  cout,mamba_dim, **mamba2_args):
         super().__init__(cin, cout, mamba_dim, **mamba2_args)
 
@@ -356,7 +356,7 @@ class BiMamba2_2d(BaseBiMaba2):
         return x
 
 
-class BiMamba2_3d(BaseBiMaba2):
+class NdMamba2_3d(BaseNdMamba2):
     def __init__(self, cin,  cout,mamba_dim, **mamba2_args):
         super().__init__(cin, cout, mamba_dim, **mamba2_args)
 
@@ -381,7 +381,7 @@ class BiMamba2_3d(BaseBiMaba2):
         return x
 
 
-class BiMamba2(BaseBiMaba2):
+class NdMamba2(BaseNdMamba2):
     def __init__(self, cin,  cout, mamba_dim, **mamba2_args):
         super().__init__(cin, cout, mamba_dim, **mamba2_args)
 
@@ -405,12 +405,12 @@ class BiMamba2(BaseBiMaba2):
 
 if __name__ == '__main__':
     # 通用的多维度双向mamba2
-    net_n = BiMamba2(64, 128, 64).cuda()
+    net_n = NdMamba2(64, 128, 64).cuda()
 
     # 定制的双向mamba2 1d, 2d, 3d
-    net1 = BiMamba2_1d(64, 128, 64).cuda()
-    net2 = BiMamba2_2d(64, 128, 64).cuda()
-    net3 = BiMamba2_3d(64, 128, 64).cuda()
+    net1 = NdMamba2_1d(64, 128, 64).cuda()
+    net2 = NdMamba2_2d(64, 128, 64).cuda()
+    net3 = NdMamba2_3d(64, 128, 64).cuda()
 
     # 多维度数据
     x1 = torch.randn(1, 64, 32).cuda() # 1d
