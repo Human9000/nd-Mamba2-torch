@@ -19,12 +19,12 @@
 
 if __name__ == '__main__':
     # 通用的多维度双向mamba2
-    net_n = BiMamba2(64, 128, 64).cuda()
+    net_n = NdMamba2(64, 128, 64).cuda()
 
     # 定制的双向mamba2 1d, 2d, 3d
-    net1 = BiMamba2_1d(64, 128, 64).cuda()
-    net2 = BiMamba2_2d(64, 128, 64).cuda()
-    net3 = BiMamba2_3d(64, 128, 64).cuda()
+    net1 = NdMamba2_1d(64, 128, 64).cuda()
+    net2 = NdMamba2_2d(64, 128, 64).cuda()
+    net3 = NdMamba2_3d(64, 128, 64).cuda()
 
     # 多维度数据
     x1 = torch.randn(1, 64, 32).cuda() # 1d
