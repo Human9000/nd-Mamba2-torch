@@ -19,21 +19,14 @@ class Mamba2(nn.Module):
         self.chunk_size = torch.tensor(chunk_size, dtype=torch.int32)
 
         self.d_inner = expand * d_model
-        assert self.d_inner % self.headdim == 0
+        assert self.d_inner % self.headdim == 0, "self.d_inner must be divisible by self.headdim"
         self.nheads = self.d_inner // self.headdim
 
         d_in_proj = 2 * self.d_inner + 2 * self.d_state + self.nheads
         self.in_proj = nn.Linear(d_model, d_in_proj, bias=False)
 
         conv_dim = self.d_inner + 2 * d_state
-        self.conv1d = nn.Conv1d(
-            in_channels=conv_dim,
-            out_channels=conv_dim,
-            kernel_size=d_conv,
-            groups=conv_dim,
-            padding=d_conv - 1,
-        )
-
+        self.conv1d = nn.Conv1d(conv_dim, conv_dim, d_conv, groups=conv_dim, padding=d_conv - 1, )
         self.dt_bias = nn.Parameter(torch.empty(self.nheads, ))
         self.A_log = nn.Parameter(torch.empty(self.nheads, ))
         self.D = nn.Parameter(torch.empty(self.nheads, ))
@@ -53,6 +46,7 @@ class Mamba2(nn.Module):
             dim=-1,
         )
         dt = F.softplus(dt + self.dt_bias)  # (batch, seqlen, nheads)
+
         # Pad or truncate xBC seqlen to d_conv
         xBC = silu(
             self.conv1d(xBC.transpose(1, 2)).transpose(1, 2)[:, : u.shape[1], :]
@@ -60,87 +54,77 @@ class Mamba2(nn.Module):
         x, B, C = torch.split(
             xBC, [self.d_inner, self.d_state, self.d_state], dim=-1
         )
-        # =======================================================
-        # x = rearrange(x, "b l (h p) -> b l h p", p=self.args.headdim)
+
         _b, _l, _hp = x.shape
         _h = _hp // self.headdim
         _p = self.headdim
         x = x.reshape(_b, _l, _h, _p)
-        # ========================================================
 
-        y = ssd(
-            x * dt.unsqueeze(-1),
-            A * dt,
-            # =======================================================
-            # rearrange(B, "b l n -> b l 1 n"),
-            # rearrange(C, "b l n -> b l 1 n"),
-            B.unsqueeze(2),
-            C.unsqueeze(2),
-            # =======================================================
-            self.chunk_size,
-        )
+        y = self.ssd(x * dt.unsqueeze(-1),
+                     A * dt,
+                     B.unsqueeze(2),
+                     C.unsqueeze(2), )
+
         y = y + x * self.D.unsqueeze(-1)
-        # =======================================================
-        # y = rearrange(y, "b l h p -> b l (h p)")
+
         _b, _l, _h, _p = y.shape
         y = y.reshape(_b, _l, _h * _p)
-        # =======================================================
+
         y = self.norm(y, z)
         y = self.out_proj(y)
 
         return y
 
+    def segsum(self, x: Tensor) -> Tensor:
+        T = x.size(-1)
+        device = x.device
+        x = x[..., None].repeat(1, 1, 1, 1, T)
+        mask = torch.tril(torch.ones(T, T, dtype=torch.bool, device=device), diagonal=-1)
+        x = x.masked_fill(~mask, 0)
+        x_segsum = torch.cumsum(x, dim=-2)
+        mask = torch.tril(torch.ones(T, T, dtype=torch.bool, device=device), diagonal=0)
+        x_segsum = x_segsum.masked_fill(~mask, -torch.inf)
+        return x_segsum
 
-def segsum(x: Tensor) -> Tensor:
-    T = x.size(-1)
-    device = x.device
-    x = x[..., None].repeat(1, 1, 1, 1, T)
-    mask = torch.tril(torch.ones(T, T, dtype=torch.bool, device=device), diagonal=-1)
-    x = x.masked_fill(~mask, 0)
-    x_segsum = torch.cumsum(x, dim=-2)
-    mask = torch.tril(torch.ones(T, T, dtype=torch.bool, device=device), diagonal=0)
-    x_segsum = x_segsum.masked_fill(~mask, -torch.inf)
-    return x_segsum
+    def ssd(self, x, A, B, C):
+        chunk_size = self.chunk_size
+        assert x.shape[1] % chunk_size == 0
+        x = x.reshape(x.shape[0], x.shape[1] // chunk_size, chunk_size, x.shape[2], x.shape[3], )
+        B = B.reshape(B.shape[0], B.shape[1] // chunk_size, chunk_size, B.shape[2], B.shape[3], )
+        C = C.reshape(C.shape[0], C.shape[1] // chunk_size, chunk_size, C.shape[2], C.shape[3], )
+        A = A.reshape(A.shape[0], A.shape[1] // chunk_size, chunk_size, A.shape[2])
+        A = A.permute(0, 3, 1, 2)
+        A_cumsum = torch.cumsum(A, dim=-1)
 
+        # 1. Compute the output for each intra-chunk (diagonal blocks)
+        L = torch.exp(self.segsum(A))
+        Y_diag = torch.einsum("bclhn, bcshn, bhcls, bcshp -> bclhp", C, B, L, x)
 
-def ssd(x, A, B, C, chunk_size):
-    assert x.shape[1] % chunk_size == 0
-    x = x.reshape(x.shape[0], x.shape[1] // chunk_size, chunk_size, x.shape[2], x.shape[3], )
-    B = B.reshape(B.shape[0], B.shape[1] // chunk_size, chunk_size, B.shape[2], B.shape[3], )
-    C = C.reshape(C.shape[0], C.shape[1] // chunk_size, chunk_size, C.shape[2], C.shape[3], )
-    A = A.reshape(A.shape[0], A.shape[1] // chunk_size, chunk_size, A.shape[2])
-    A = A.permute(0, 3, 1, 2)
-    A_cumsum = torch.cumsum(A, dim=-1)
+        # 2. Compute the state for each intra-chunk
+        # (right term of low-rank factorization of off-diagonal blocks; B terms)
+        decay_states = torch.exp(A_cumsum[:, :, :, -1:] - A_cumsum)
+        states = torch.einsum("bclhn, bhcl, bclhp -> bchpn", B, decay_states, x)
 
-    # 1. Compute the output for each intra-chunk (diagonal blocks)
-    L = torch.exp(segsum(A))
-    Y_diag = torch.einsum("bclhn, bcshn, bhcls, bcshp -> bclhp", C, B, L, x)
+        # 3. Compute the inter-chunk SSM recurrence; produces correct SSM states at chunk boundaries
+        # (middle term of factorization of off-diag blocks; A terms)
 
-    # 2. Compute the state for each intra-chunk
-    # (right term of low-rank factorization of off-diagonal blocks; B terms)
-    decay_states = torch.exp(A_cumsum[:, :, :, -1:] - A_cumsum)
-    states = torch.einsum("bclhn, bhcl, bclhp -> bchpn", B, decay_states, x)
+        initial_states = torch.zeros_like(states[:, :1])
+        states = torch.cat([initial_states, states], dim=1)
+        decay_chunk = torch.exp(self.segsum(F.pad(A_cumsum[:, :, :, -1], (1, 0))))
+        new_states = torch.einsum("bhzc, bchpn -> bzhpn", decay_chunk.squeeze(1), states)
+        states = new_states[:, :-1]
 
-    # 3. Compute the inter-chunk SSM recurrence; produces correct SSM states at chunk boundaries
-    # (middle term of factorization of off-diag blocks; A terms)
+        # 4. Compute state -> output conversion per chunk
+        # (left term of low-rank factorization of off-diagonal blocks; C terms)
+        state_decay_out = torch.exp(A_cumsum)
+        Y_off = torch.einsum("bclhn, bchpn, bhcl -> bclhp", C, states, state_decay_out)
 
-    initial_states = torch.zeros_like(states[:, :1])
-    states = torch.cat([initial_states, states], dim=1)
-    decay_chunk = torch.exp(segsum(F.pad(A_cumsum[:, :, :, -1], (1, 0))))
-    new_states = torch.einsum("bhzc, bchpn -> bzhpn", decay_chunk.squeeze(1), states)
-    states = new_states[:, :-1]
+        # Add output of intra-chunk and inter-chunk terms (diagonal and off-diagonal blocks)
+        # Y = rearrange(Y_diag + Y_off, "b c l h p -> b (c l) h p")
+        Y = Y_diag + Y_off
+        Y = Y.reshape(Y.shape[0], Y.shape[1] * Y.shape[2], Y.shape[3], Y.shape[4], )
 
-    # 4. Compute state -> output conversion per chunk
-    # (left term of low-rank factorization of off-diagonal blocks; C terms)
-    state_decay_out = torch.exp(A_cumsum)
-    Y_off = torch.einsum("bclhn, bchpn, bhcl -> bclhp", C, states, state_decay_out)
-
-    # Add output of intra-chunk and inter-chunk terms (diagonal and off-diagonal blocks)
-    # Y = rearrange(Y_diag + Y_off, "b c l h p -> b (c l) h p")
-    Y = Y_diag + Y_off
-    Y = Y.reshape(Y.shape[0], Y.shape[1] * Y.shape[2], Y.shape[3], Y.shape[4], )
-
-    return Y
+        return Y
 
 
 class RMSNorm(nn.Module):
@@ -161,7 +145,6 @@ def silu(x):
 class BaseBiMamba2(nn.Module):
     def __init__(self, cin, cout, mamba_dim, **mamba2_args):
         super().__init__()
-        assert mamba_dim % 64 == 0, "cmid 必须是64的倍数"
         self.fc_in = nn.Linear(cin, mamba_dim, bias=False)  # 调整通道数到cmid
         self.mamba2_for = Mamba2(mamba_dim, **mamba2_args)  # 正向
         self.mamba2_back = Mamba2(mamba_dim, **mamba2_args)  # 负向
@@ -177,9 +160,8 @@ class BiMamba2_1D(BaseBiMamba2):
         x = F.pad(x, (0, (64 - x.shape[2] % 64) % 64))  # 将 l , pad到4的倍数, [b, c64,l4]
         x = x.transpose(1, 2)  # 转成 1d 信号 [b, c64, d4*w4*h4]
         x = self.fc_in(x)  # 调整通道数为目标通道数
-        x1, h1 = self.mamba2_for(x)
-        x2, h2 = self.mamba2_back(x.flip(1))
-        x2 = x2.flip(1)
+        x1 = self.mamba2_for(x)
+        x2 = self.mamba2_back(x.flip(1)).flip(1)
         x = x1 + x2
         x = self.fc_out(x)  # 调整通道数为目标通道数
         x = x.transpose(1, 2)  # 转成 1d 信号 [b, c64, d4*w4*h4] ]
@@ -199,9 +181,8 @@ class BiMamba2_2D(BaseBiMamba2):
         _b, _c, _h, _w = x.shape
         x = x.permute(0, 2, 3, 1).reshape(_b, _h * _w, _c)
         x = self.fc_in(x)  # 调整通道数为目标通道数
-        x1, h1 = self.mamba2_for(x)
-        x2, h2 = self.mamba2_back(x.flip(1))
-        x2 = x2.flip(1)
+        x1 = self.mamba2_for(x)
+        x2 = self.mamba2_back(x.flip(1)).flip(1)
         x = x1 + x2
         x = self.fc_out(x)  # 调整通道数为目标通道数
         x = x.permute(0, 3, 1, 2).reshape(_b, _c, _h, _w, )
@@ -221,11 +202,9 @@ class BiMamba2_3D(BaseBiMamba2):
                   )  # 将 d, h, w , pad到4的倍数, [b, c64,d4, h4, w4]
         _b, _c, _d, _h, _w = x.shape
         x = x.permute(0, 2, 3, 4, 1).reshape(_b, _d * _h * _w, _c)
-
         x = self.fc_in(x)  # 调整通道数为目标通道数
-        x1, h1 = self.mamba2_for(x)
-        x2, h2 = self.mamba2_back(x.flip(1))
-        x2 = x2.flip(1)
+        x1 = self.mamba2_for(x)
+        x2 = self.mamba2_back(x.flip(1)).flip(1)
         x = x1 + x2
         x = self.fc_out(x)  # 调整通道数为目标通道数
         x = x.permute(0, 4, 1, 2, 4).reshape(_b, _c, _d, _h, _w, )
@@ -245,8 +224,7 @@ class BiMamba2(BaseBiMamba2):
         x = x.transpose(1, 2)  # 转成 1d 信号
         x = self.fc_in(x)  # 调整通道数为目标通道数
         x1 = self.mamba2_for(x)
-        x2 = self.mamba2_back(x.flip(1))
-        x2 = x2.flip(1)
+        x2 = self.mamba2_back(x.flip(1)).flip(1)
         x = x1 + x2
         x = self.fc_out(x)  # 调整通道数为目标通道数
         x = x.transpose(1, 2)  # 转成 1d 信号
@@ -257,10 +235,10 @@ class BiMamba2(BaseBiMamba2):
 
 if __name__ == '__main__':
     # 通用的多维度双向mamba2
-    net_n = BiMamba2(64, 128, 64).cuda()
+    net_n = BiMamba2(61, 128, 32).cuda()
     net_n_script = torch.jit.script(net_n)
     torch.jit.save(net_n_script, 'net_n.jit.script')
     net_n2 = torch.jit.load('net_n.jit.script')
-    x = torch.randn(1, 64, 64, 64).cuda()
+    x = torch.randn(1, 61, 63, 63).cuda()
     y = net_n2(x)
     print(y.shape)
