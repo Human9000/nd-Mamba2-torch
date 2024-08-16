@@ -8,8 +8,9 @@
 - ✅ 支持通用的Nd数据(batch,channel,*size)
 - ✅ 有好的环境支持（纯PyTorch实现，即插即用）
   
-## 新特性
-- ✅ 支持torch的jit.scipt格式导出(ex_mamba2.py)
+## ex_bi_mamba2.py新特性
+- ✅ 支持torch.jit.scipt格式导出（取消了einops库以及配置类）
+- ✅ 更易阅读 (删除了大量冗余代码) 
   
 ## 提示
 *如果你想要更快的速度，可以将本项目中的Mamba2替换为Mamba2官方的Cuda加速实现，并按照官方要求安装各种依赖包，这不会影响本项目对多维度数据的支持*
