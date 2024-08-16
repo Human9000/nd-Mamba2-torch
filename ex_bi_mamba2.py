@@ -1,6 +1,22 @@
 import torch
-import torch.nn.functional as F
 from torch import Tensor, nn
+from torch.nn import functional as F
+from abc import abstractmethod
+
+
+def silu(x):
+    return x * F.sigmoid(x)
+
+
+class RMSNorm(nn.Module):
+    def __init__(self, d: int, eps: float = 1e-5):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(d))
+
+    def forward(self, x, z):
+        x = x * silu(z)
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps) * self.weight
 
 
 class Mamba2(nn.Module):
@@ -127,33 +143,33 @@ class Mamba2(nn.Module):
         return Y
 
 
-class RMSNorm(nn.Module):
-    def __init__(self, d: int, eps: float = 1e-5):
+class _BiMamba2(nn.Module):
+    def __init__(self,
+                 cin: int,
+                 cout: int,
+                 d_model: int,  # model dimension (D)
+                 n_layer: int = 24,  # number of Mamba-2 layers in the language model
+                 d_state: int = 128,  # state dimension (N)
+                 d_conv: int = 4,  # convolution kernel size
+                 expand: int = 2,  # expansion factor (E)
+                 headdim: int = 64,  # head dimension (P)
+                 chunk_size: int = 64,  # matrix partition size (Q)
+                 ):
         super().__init__()
-        self.eps = eps
-        self.weight = nn.Parameter(torch.ones(d))
+        self.fc_in = nn.Linear(cin, d_model, bias=False)  # 调整通道数到cmid
+        self.mamba2_for = Mamba2(d_model, n_layer, d_state, d_conv, expand, headdim, chunk_size, )  # 正向
+        self.mamba2_back = Mamba2(d_model, n_layer, d_state, d_conv, expand, headdim, chunk_size, )  # 负向
+        self.fc_out = nn.Linear(d_model, cout, bias=False)  # 调整通道数到cout
+        self.chunk_size = chunk_size
 
-    def forward(self, x, z):
-        x = x * silu(z)
-        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps) * self.weight
-
-
-def silu(x):
-    return x * F.sigmoid(x)
-
-
-class BaseBiMamba2(nn.Module):
-    def __init__(self, cin, cout, mamba_dim, **mamba2_args):
-        super().__init__()
-        self.fc_in = nn.Linear(cin, mamba_dim, bias=False)  # 调整通道数到cmid
-        self.mamba2_for = Mamba2(mamba_dim, **mamba2_args)  # 正向
-        self.mamba2_back = Mamba2(mamba_dim, **mamba2_args)  # 负向
-        self.fc_out = nn.Linear(mamba_dim, cout, bias=False)  # 调整通道数到cout
+    @abstractmethod
+    def forward(self, x):
+        pass
 
 
-class BiMamba2_1D(BaseBiMamba2):
-    def __init__(self, cin, cmid, cout, **mamba2_args):
-        super().__init__(cin, cmid, cout, **mamba2_args)
+class BiMamba2_1D(_BiMamba2):
+    def __init__(self, cin, cout, d_model, **mamba2_args):
+        super().__init__(cin, cout, d_model, **mamba2_args)
 
     def forward(self, x):
         l = x.shape[2]
@@ -169,9 +185,9 @@ class BiMamba2_1D(BaseBiMamba2):
         return x
 
 
-class BiMamba2_2D(BaseBiMamba2):
-    def __init__(self, cin, cout, mamba_dim, **mamba2_args):
-        super().__init__(cin, cout, mamba_dim, **mamba2_args)
+class BiMamba2_2D(_BiMamba2):
+    def __init__(self, cin, cout, d_model, **mamba2_args):
+        super().__init__(cin, cout, d_model, **mamba2_args)
 
     def forward(self, x):
         h, w = x.shape[2:]
@@ -190,9 +206,9 @@ class BiMamba2_2D(BaseBiMamba2):
         return x
 
 
-class BiMamba2_3D(BaseBiMamba2):
-    def __init__(self, cin, cout, mamba_dim, **mamba2_args):
-        super().__init__(cin, cout, mamba_dim, **mamba2_args)
+class BiMamba2_3D(_BiMamba2):
+    def __init__(self, cin, cout, d_model, **mamba2_args):
+        super().__init__(cin, cout, d_model, **mamba2_args)
 
     def forward(self, x):
         d, h, w = x.shape[2:]
@@ -212,15 +228,19 @@ class BiMamba2_3D(BaseBiMamba2):
         return x
 
 
-class BiMamba2(BaseBiMamba2):
-    def __init__(self, cin, cout, mamba_dim, **mamba2_args):
-        super().__init__(cin, cout, mamba_dim, **mamba2_args)
+class BiMamba2(_BiMamba2):
+    def __init__(self, cin, cout, d_model, **mamba2_args):
+        super().__init__(cin, cout, d_model, **mamba2_args)
 
     def forward(self, x):
         size = x.shape[2:]
+        out_size =list( x.shape)
+        out_size[1] = -1
+
         x = torch.flatten(x, 2)  # b c size
         l = x.shape[2]
-        x = F.pad(x, (0, (64 - x.shape[2] % 64) % 64))  # 将 l , pad到4的倍数, [b, c64,l4]
+        _s = self.chunk_size
+        x = F.pad(x, [0, (_s - x.shape[2] % _s) % _s])  # 将 l, pad到chunk_size的倍数, [b, c64,l4]
         x = x.transpose(1, 2)  # 转成 1d 信号
         x = self.fc_in(x)  # 调整通道数为目标通道数
         x1 = self.mamba2_for(x)
@@ -229,16 +249,36 @@ class BiMamba2(BaseBiMamba2):
         x = self.fc_out(x)  # 调整通道数为目标通道数
         x = x.transpose(1, 2)  # 转成 1d 信号
         x = x[:, :, :l]  # 截取原图大小
-        x = torch.unflatten(x, 2, size)
+        # x = torch.unflatten(x, 2, size)
+        x = x.reshape(out_size)
+
         return x
 
+
+def test_export_jit_script(net, x):
+    net_script = torch.jit.script(net)
+    torch.jit.save(net_script, 'net.jit.script')
+    net2 = torch.jit.load('net.jit.script')
+    y = net2(x)
+    print(y.shape)
+
+def test_export_onnx(net, x):
+    torch.onnx.export(net,
+                      x,
+                      "net.onnx",  # 输出的 ONNX 文件名
+                      export_params=True,  # 存储训练参数
+                      opset_version=14,  # 指定 ONNX 操作集版本
+                      do_constant_folding=False,  # 是否执行常量折叠优化
+                      input_names=['input'],  # 输入张量的名称
+                      output_names=['output'],  # 输出张量的名称
+                      dynamic_axes={'input': {0: 'batch_size'},  # 可变维度的字典
+                                    'output': {0: 'batch_size'}})
 
 if __name__ == '__main__':
     # 通用的多维度双向mamba2
     net_n = BiMamba2(61, 128, 32).cuda()
-    net_n_script = torch.jit.script(net_n)
-    torch.jit.save(net_n_script, 'net_n.jit.script')
-    net_n2 = torch.jit.load('net_n.jit.script')
+    net_n.eval()
     x = torch.randn(1, 61, 63, 63).cuda()
-    y = net_n2(x)
-    print(y.shape)
+    test_export_jit_script(net_n, x)
+    test_export_onnx(net_n, x)
+
