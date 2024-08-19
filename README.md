@@ -1,7 +1,7 @@
 # Nd-Mamba2 for any dimension by pytorch
 仅使用PyTorch实现的双向Mamba2（BiMamba2）提供N维度支持，包括1d，2d，3d数据的支持，借助BiMamba2你可以很方便的缝合到任意模型中去提高精度。
 
-## nd_manba2.py特点
+## nd_mamba2.py特点
 - ✅ 支持定制的1d数据(batch,channel,length)
 - ✅ 支持定制的2d数据(batch,channel,height,width)
 - ✅ 支持定制的3d数据(batch,channel,deep,height,width)
@@ -12,6 +12,7 @@
 - ✅ 支持torch.jit.scipt格式导出（取消了einops库以及配置类）
 - ✅ 支持onnx格式导出（采用onnx_14的版本，支持下三角阵的操作）
 - ✅ 更易阅读 (删除了大量冗余代码) 
+- ✅ 同时兼容nd_mamba2.py的所有特点
   
 ## 提示
 *如果你想要更快的速度，可以将本项目中的Mamba2替换为Mamba2官方的Cuda加速实现，并按照官方要求安装各种依赖包，这不会影响本项目对多维度数据的支持，但会对模型的导出产生影响*
