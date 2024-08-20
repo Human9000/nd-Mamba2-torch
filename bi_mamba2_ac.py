@@ -19,9 +19,7 @@ class BiMamba2Ac2d(nn.Module):
 
         # 先 w 再 h
         x_w1 = x.transpose(1, 2).reshape(b * h, c, w)  # bh, c, w
-        print(x_w1.shape, b, h, c, w)
         y_w1 = self.bi_mamba_w1(x_w1)
-        print(y_w1.shape)
         y_w1 = y_w1.reshape(b, h, -1, w).transpose(1, 2)
         x_h1 = y_w1.transpose(1, 3).reshape(b * w, h, -1).transpose(1, 2)  # bw, c, h
         y1 = self.bi_mamba_h1(x_h1).transpose(1, 2).reshape(b, w, h, -1).transpose(1, 3)
@@ -61,11 +59,8 @@ def test_export_onnx(net, x):
 
 if __name__ == '__main__':
     net = BiMamba2Ac2d(61, 128, 32).cuda()
-    # net = BiMamba2_1D(61, 128, 32).cuda()
     net.eval()
 
     x = torch.randn(1, 61, 63, 63).cuda()
-    y = net(x)
-    print(y.shape)
     test_export_jit_script(net, x)
     test_export_onnx(net, x)

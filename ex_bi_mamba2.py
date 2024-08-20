@@ -32,7 +32,8 @@ class Mamba2(nn.Module):
         self.n_layer = n_layer
         self.d_state = d_state
         self.headdim = headdim
-        self.chunk_size = torch.tensor(chunk_size, dtype=torch.int32)
+        # self.chunk_size = torch.tensor(chunk_size, dtype=torch.int32)
+        self.chunk_size = chunk_size
 
         self.d_inner = expand * d_model
         assert self.d_inner % self.headdim == 0, "self.d_inner must be divisible by self.headdim"
@@ -104,7 +105,8 @@ class Mamba2(nn.Module):
 
     def ssd(self, x, A, B, C):
         chunk_size = self.chunk_size
-        assert x.shape[1] % chunk_size == 0
+        # if x.shape[1] % chunk_size == 0:
+        #
         x = x.reshape(x.shape[0], x.shape[1] // chunk_size, chunk_size, x.shape[2], x.shape[3], )
         B = B.reshape(B.shape[0], B.shape[1] // chunk_size, chunk_size, B.shape[2], B.shape[3], )
         C = C.reshape(C.shape[0], C.shape[1] // chunk_size, chunk_size, C.shape[2], C.shape[3], )
@@ -126,9 +128,9 @@ class Mamba2(nn.Module):
 
         initial_states = torch.zeros_like(states[:, :1])
         states = torch.cat([initial_states, states], dim=1)
-        decay_chunk = torch.exp(self.segsum(F.pad(A_cumsum[:, :, :, -1], (1, 0))))
-        # print(decay_chunk.shape, states.shape)
-        new_states = torch.einsum("bhzc, bchpn -> bzhpn", decay_chunk[0] , states)
+
+        decay_chunk = torch.exp(self.segsum(F.pad(A_cumsum[:, :, :, -1], (1, 0))))[0]
+        new_states = torch.einsum("bhzc, bchpn -> bzhpn", decay_chunk, states)
         states = new_states[:, :-1]
 
         # 4. Compute state -> output conversion per chunk
@@ -257,6 +259,7 @@ class BiMamba2(_BiMamba2):
 
 
 def test_export_jit_script(net, x):
+    y = net(x)
     net_script = torch.jit.script(net)
     torch.jit.save(net_script, 'net.jit.script')
     net2 = torch.jit.load('net.jit.script')
@@ -281,7 +284,7 @@ if __name__ == '__main__':
     # net_n = BiMamba2_1D(61, 128, 32).cuda()
     net_n.eval()
 
-    x = torch.randn(1, 61, 63, 63).cuda()
-    y = net_n(x)
+    x = torch.randn(1, 61, 63).cuda()
+    # y = net_n(x)
     test_export_jit_script(net_n, x)
     test_export_onnx(net_n, x)
