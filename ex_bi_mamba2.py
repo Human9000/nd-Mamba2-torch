@@ -127,7 +127,8 @@ class Mamba2(nn.Module):
         initial_states = torch.zeros_like(states[:, :1])
         states = torch.cat([initial_states, states], dim=1)
         decay_chunk = torch.exp(self.segsum(F.pad(A_cumsum[:, :, :, -1], (1, 0))))
-        new_states = torch.einsum("bhzc, bchpn -> bzhpn", decay_chunk.squeeze(1), states)
+        # print(decay_chunk.shape, states.shape)
+        new_states = torch.einsum("bhzc, bchpn -> bzhpn", decay_chunk[0] , states)
         states = new_states[:, :-1]
 
         # 4. Compute state -> output conversion per chunk
@@ -277,8 +278,10 @@ def test_export_onnx(net, x):
 if __name__ == '__main__':
     # 通用的多维度双向mamba2
     net_n = BiMamba2(61, 128, 32).cuda()
+    # net_n = BiMamba2_1D(61, 128, 32).cuda()
     net_n.eval()
+
     x = torch.randn(1, 61, 63, 63).cuda()
+    y = net_n(x)
     test_export_jit_script(net_n, x)
     test_export_onnx(net_n, x)
-
