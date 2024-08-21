@@ -20,22 +20,20 @@ BiMamba2, implemented solely using PyTorch, provides N-dimensional support, incl
 -  ✅  Better 2D image semantic expression (using asymmetric convolution strategy to optimize 2D)
 -  ✅  Compatible with all features in ex-bi-umamba2.py
 -  ❌  Not supporting data formats such as 1d, 3d, and other dimensions
--  
+
+ 
+## [vssd_torce. py] (vssd_torce. py) New Features (Updated on August 21, 2024)
+-  ✅  Better 2D image semantic expression (optimized based on VSSD)
+-  ✅  Friendly environment support (pure torch implementation, plug and play)
+-  ❌  Not supporting data formats such as 1d, 3d, and other dimensions
+
+
 ## Reminder
 *If you want faster speed, you can replace Mamba2 in this project with Mamba2's official Cuda acceleration implementation and install various dependency packages according to official requirements. This will not affect the project's support for multi-dimensional data, but it will have an impact on the export of the model*
+ 
    
-
 ## Thanks
-* [Albert Gu], [Tri Dao] [state-spaces/mamba] - authors of the Mamba-2 architecture
-* [Thomas] - author of [tommyip/mamba2-minimal],  who inspired this repo
-  
-## Quoting
- ```bibtex
-[1] Mamba2
-@inproceedings{mamba2,
-  title={Transformers are {SSM}s: Generalized Models and Efficient Algorithms Through Structured State Space Duality},
-  author={Dao, Tri and Gu, Albert},
-  booktitle={International Conference on Machine Learning (ICML)},
-  year={2024}
-}
- ```
+* [Albert Gu], [Tri Dao] [state-spaces/mamba]( https://github.com/state-spaces/mamba ) - authors of the Mamba-2 architecture
+* [Yuheng Shi], [Minjing Dong] [YuHengsss/VSSD]( https://github.com/state-spaces/mamba ) - authors of the vssd architecture
+* [Thomas] - author of [tommyip/mamba2-minimal]( https://github.com/tommyip/mamba2-minimal ),  who inspired this repo
+ 
