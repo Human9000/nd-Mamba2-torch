@@ -1,20 +1,22 @@
 # Nd-Mamba2 for any dimension by pytorch
 BiMamba2, implemented solely using PyTorch, provides N-dimensional support, including support for 1d, 2d, and 3d data. With BiMamba2, you can easily stitch it into any model to improve accuracy.
 
-## [nd_mamba2. py] (nd_mamba2. py) Features (Updated on August 2, 2024)
+[中文README](README_中文.md)
+
+## [nd_mamba2.py] (nd_mamba2.py) Features (Updated on August 2, 2024)
 -  ✅  Support customized 1D data (batch, channel, length)
 -  ✅  Support customized 2D data (batch, channel,height,width)
 -  ✅  Support customized 3D data (batch, channel,deep,height,width)
 -  ✅  Support universal Nd data (batch, channel, * size)
 -  ✅  There is good environmental support (pure PyTorch implementation, plug and play)
 -  
-## New feature of [ex-bi-umamba2. py] (updated on August 16, 2024)
+## [ex-bi-umamba2.py] New feature (updated on August 16, 2024)
 -  ✅  Support export in torch. jit. cipt format (with the removal of the einops library and configuration classes)
 -  ✅  Support onnx format export (using onnx_14 version, supporting operations on lower triangular arrays)
 -  ✅  More readable (with a significant amount of redundant code removed)
 -  ✅  Compatible with all features of nd_mamba2.py
   
-## [bi_mamba_2 ac. py] (bi_mamba_2 ac. py) New feature (updated on August 20, 2024)
+## [bi_mamba_2 ac.py] (bi_mamba_2ac.py) New feature (updated on August 20, 2024)
 -  ✅  Better 2D image semantic expression (using asymmetric convolution strategy to optimize 2D)
 -  ✅  Compatible with all features in ex-bi-umamba2.py
 -  ❌  Not supporting data formats such as 1d, 3d, and other dimensions
