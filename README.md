@@ -11,7 +11,7 @@ BiMamba2, implemented solely using PyTorch, provides N-dimensional support, incl
 -  ✅  There is good environmental support (pure PyTorch implementation, plug and play)
   
 ## [ex-bi-umamba2.py] New feature (updated on August 16, 2024)
--  ✅  Support export in torch. jit. cipt format (with the removal of the einops library and configuration classes)
+-  ✅  Support export in torch.jit.cipt format (with the removal of the einops library and configuration classes)
 -  ✅  Support onnx format export (using onnx_14 version, supporting operations on lower triangular arrays)
 -  ✅  More readable (with a significant amount of redundant code removed)
 -  ✅  Compatible with all features of nd_mamba2.py
@@ -25,7 +25,7 @@ BiMamba2, implemented solely using PyTorch, provides N-dimensional support, incl
 ## [vssd_torce. py] (vssd_torce. py) New Features (Updated on August 21, 2024)
 -  ✅  Best 2D image semantic expression (optimized based on [VSSD]( https://github.com/state-spaces/mamba ))
 -  ✅  Friendly environment support (pure torch implementation, plug and play)
--  ❌  Cannot export to scientific and onnx formats
+-  ❌  Cannot export to torch.jit.cipt or onnx formats
 -  ❌  Not supporting data formats such as 1d, 3d, and other dimensions
 
 
