@@ -28,9 +28,8 @@
 *如果你想要更快的速度，可以将本项目中的Mamba2替换为Mamba2官方的Cuda加速实现，并按照官方要求安装各种依赖包，这不会影响本项目对多维度数据的支持，但会对模型的导出产生影响*
  
    
-## 致谢
-
+## 致谢 
 * [Albert Gu], [Tri Dao] [state-spaces/mamba](https://github.com/state-spaces/mamba) - authors of the Mamba-2 architecture
-* [Albert Gu], [Tri Dao] [YuHengsss/VSSD](https://github.com/state-spaces/mamba) - authors of the vssd architecture
+* [Yuheng Shi], [Minjing Dong] [YuHengsss/VSSD](https://github.com/state-spaces/mamba) - authors of the vssd architecture
 * [Thomas] - author of [tommyip/mamba2-minimal](https://github.com/tommyip/mamba2-minimal), who inspired this repo
   
