@@ -22,6 +22,7 @@
 ## [vssd_torch.py](vssd_torch.py)新特性（更新时间：2024/08/21）
 - ✅ 更好的2d图像语义表达（基于[VSSD]( https://github.com/state-spaces/mamba )的优化）
 - ✅ 友好的环境支持（纯torch实现，即插即用）
+- ❌ 不支持导出为scipt及onnx格式
 - ❌ 不支持1d、3d等其他维度的数据格式
 
 ## 提示
