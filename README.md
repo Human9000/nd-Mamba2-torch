@@ -9,7 +9,7 @@ BiMamba2, implemented solely using PyTorch, provides N-dimensional support, incl
 -  ✅  Support customized 3D data (batch, channel,deep,height,width)
 -  ✅  Support universal Nd data (batch, channel, * size)
 -  ✅  There is good environmental support (pure PyTorch implementation, plug and play)
--  
+  
 ## [ex-bi-umamba2.py] New feature (updated on August 16, 2024)
 -  ✅  Support export in torch. jit. cipt format (with the removal of the einops library and configuration classes)
 -  ✅  Support onnx format export (using onnx_14 version, supporting operations on lower triangular arrays)
