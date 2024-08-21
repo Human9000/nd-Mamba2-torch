@@ -30,9 +30,9 @@
    
 ## 致谢
 
-* [Albert Gu], [Tri Dao] [state-spaces/mamba](state-spaces/mamba) - authors of the Mamba-2 architecture
-* [Albert Gu], [Tri Dao] [YuHengsss/VSSD](state-spaces/mamba) - authors of the vssd architecture
-* [Thomas] - author of [tommyip/mamba2-minimal](tommyip/mamba2-minimal), who inspired this repo
+* [Albert Gu], [Tri Dao] [state-spaces/mamba](https://github.com/state-spaces/mamba) - authors of the Mamba-2 architecture
+* [Albert Gu], [Tri Dao] [YuHengsss/VSSD](https://github.com/state-spaces/mamba) - authors of the vssd architecture
+* [Thomas] - author of [tommyip/mamba2-minimal](https://github.com/tommyip/mamba2-minimal), who inspired this repo
   
 ## 引用
  ```bibtex
