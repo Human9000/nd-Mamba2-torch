@@ -19,14 +19,20 @@
 - ✅ 兼容ex_bi_mamba2.py中的所有特点
 - ❌ 不支持1d、3d等其他维度的数据格式
 
+## [vssd_torch.py](vssd_torch.py)新特性（更新时间：2024/08/21）
+- ✅ 更好的2d图像语义表达（基于vssd的优化）
+- ✅ 友好的环境支持（纯torch实现，即插即用）
+- ❌ 不支持1d、3d等其他维度的数据格式
+
 ## 提示
 *如果你想要更快的速度，可以将本项目中的Mamba2替换为Mamba2官方的Cuda加速实现，并按照官方要求安装各种依赖包，这不会影响本项目对多维度数据的支持，但会对模型的导出产生影响*
  
    
 ## 致谢
 
-* [Albert Gu], [Tri Dao] [state-spaces/mamba] - authors of the Mamba-2 architecture
-* [Thomas] - author of [tommyip/mamba2-minimal], who inspired this repo
+* [Albert Gu], [Tri Dao] [state-spaces/mamba](state-spaces/mamba) - authors of the Mamba-2 architecture
+* [Albert Gu], [Tri Dao] [YuHengsss/VSSD](state-spaces/mamba) - authors of the vssd architecture
+* [Thomas] - author of [tommyip/mamba2-minimal](tommyip/mamba2-minimal), who inspired this repo
   
 ## 引用
  ```bibtex
