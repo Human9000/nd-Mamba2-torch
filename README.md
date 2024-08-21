@@ -25,7 +25,7 @@ BiMamba2, implemented solely using PyTorch, provides N-dimensional support, incl
 ## [vssd_torce. py] (vssd_torce. py) New Features (Updated on August 21, 2024)
 -  ✅  Best 2D image semantic expression (optimized based on [VSSD]( https://github.com/state-spaces/mamba ))
 -  ✅  Friendly environment support (pure torch implementation, plug and play)
--  ❌ 不支持导出为scipt及onnx格式
+-  ❌  Cannot export to scientific and onnx formats
 -  ❌  Not supporting data formats such as 1d, 3d, and other dimensions
 
 
