@@ -34,13 +34,3 @@
 * [Albert Gu], [Tri Dao] [YuHengsss/VSSD](https://github.com/state-spaces/mamba) - authors of the vssd architecture
 * [Thomas] - author of [tommyip/mamba2-minimal](https://github.com/tommyip/mamba2-minimal), who inspired this repo
   
-## 引用
- ```bibtex
-[1] Mamba2
-@inproceedings{mamba2,
-  title={Transformers are {SSM}s: Generalized Models and Efficient Algorithms Through Structured State Space Duality},
-  author={Dao, Tri and Gu, Albert},
-  booktitle={International Conference on Machine Learning (ICML)},
-  year={2024}
-}
- ```
