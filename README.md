@@ -1,83 +1,33 @@
 # Nd-Mamba2 for any dimension by pytorch
-仅使用PyTorch实现的双向Mamba2（BiMamba2）提供N维度支持，包括1d，2d，3d数据的支持，借助BiMamba2你可以很方便的缝合到任意模型中去提高精度。
+BiMamba2, implemented solely using PyTorch, provides N-dimensional support, including support for 1d, 2d, and 3d data. With BiMamba2, you can easily stitch it into any model to improve accuracy.
 
-## [nd_mamba2.py](nd_mamba2.py)特点（更新时间：2024/08/02）
-- ✅ 支持定制的1d数据(batch,channel,length)
-- ✅ 支持定制的2d数据(batch,channel,height,width)
-- ✅ 支持定制的3d数据(batch,channel,deep,height,width)
-- ✅ 支持通用的Nd数据(batch,channel,*size)
-- ✅ 有好的环境支持（纯PyTorch实现，即插即用）
+## [nd_mamba2. py] (nd_mamba2. py) Features (Updated on August 2, 2024)
+-  ✅  Support customized 1D data (batch, channel, length)
+-  ✅  Support customized 2D data (batch, channel,height,width)
+-  ✅  Support customized 3D data (batch, channel,deep,height,width)
+-  ✅  Support universal Nd data (batch, channel, * size)
+-  ✅  There is good environmental support (pure PyTorch implementation, plug and play)
+-  
+## New feature of [ex-bi-umamba2. py] (updated on August 16, 2024)
+-  ✅  Support export in torch. jit. cipt format (with the removal of the einops library and configuration classes)
+-  ✅  Support onnx format export (using onnx_14 version, supporting operations on lower triangular arrays)
+-  ✅  More readable (with a significant amount of redundant code removed)
+-  ✅  Compatible with all features of nd_mamba2.py
   
-## [ex_bi_mamba2.py](ex_bi_mamba2.py)新特性（更新时间：2024/08/16）
-- ✅ 支持torch.jit.scipt格式导出（取消了einops库以及配置类）
-- ✅ 支持onnx格式导出（采用onnx_14的版本，支持下三角阵的操作）
-- ✅ 更易阅读 (删除了大量冗余代码) 
-- ✅ 兼容nd_mamba2.py的所有特点
-  
-## [bi_mamba2_ac.py](bi_mamba2_ac.py)新特性（更新时间：2024/08/20）
-- ✅ 更好的2d图像语义表达（使用非对称卷积的策略优化2d）
-- ✅ 兼容ex_bi_mamba2.py中的所有特点
-- ❌ 不支持1d、3d等其他维度的数据格式
+## [bi_mamba_2 ac. py] (bi_mamba_2 ac. py) New feature (updated on August 20, 2024)
+-  ✅  Better 2D image semantic expression (using asymmetric convolution strategy to optimize 2D)
+-  ✅  Compatible with all features in ex-bi-umamba2.py
+-  ❌  Not supporting data formats such as 1d, 3d, and other dimensions
+-  
+## Reminder
+*If you want faster speed, you can replace Mamba2 in this project with Mamba2's official Cuda acceleration implementation and install various dependency packages according to official requirements. This will not affect the project's support for multi-dimensional data, but it will have an impact on the export of the model*
+   
 
-## 提示
-*如果你想要更快的速度，可以将本项目中的Mamba2替换为Mamba2官方的Cuda加速实现，并按照官方要求安装各种依赖包，这不会影响本项目对多维度数据的支持，但会对模型的导出产生影响*
- 
-  
-## 使用样例
-### 代码
-```python
-
-
-if __name__ == '__main__':
-    # 通用的多维度双向mamba2
-    net_n = NdMamba2(64, 128, 64).cuda()
-
-    # 定制的双向mamba2 1d, 2d, 3d
-    net1 = NdMamba2_1d(64, 128, 64).cuda()
-    net2 = NdMamba2_2d(64, 128, 64).cuda()
-    net3 = NdMamba2_3d(64, 128, 64).cuda()
-
-    # 多维度数据
-    x1 = torch.randn(1, 64, 32).cuda() # 1d
-    x2 = torch.randn(1, 64, 32, 77).cuda() # 2d
-    x3 = torch.randn(1, 64, 32, 77, 25).cuda() # 3d
-    x4 = torch.randn(1, 64, 32, 77, 25, 15).cuda() # 4d
-
-    # 测试
-    y1 = net_n(x1)
-    print(y1.shape)
-    y2 = net_n(x2)
-    print(y2.shape)
-    y3 = net_n(x3)
-    print(y3.shape)
-    y4 = net_n(x4)
-    print(y4.shape)
-
-
-    y1 = net1(x1)
-    print(y1.shape)
-    y2 = net2(x2)
-    print(y2.shape)
-    y3 = net3(x3)
-    print(y3.shape)
-```
-### 效果
-``` base
-torch.Size([1, 128, 32])
-torch.Size([1, 128, 32, 77])
-torch.Size([1, 128, 32, 77, 25])
-torch.Size([1, 128, 32, 77, 25, 15])
-torch.Size([1, 128, 32])
-torch.Size([1, 128, 32, 77])
-torch.Size([1, 128, 32, 77, 25])
-```
-
-## 致谢
-
+## Thanks
 * [Albert Gu], [Tri Dao] [state-spaces/mamba] - authors of the Mamba-2 architecture
-* [Thomas] - author of [tommyip/mamba2-minimal], who inspired this repo
+* [Thomas] - author of [tommyip/mamba2-minimal],  who inspired this repo
   
-## 引用
+## Quoting
  ```bibtex
 [1] Mamba2
 @inproceedings{mamba2,
