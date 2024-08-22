@@ -28,9 +28,10 @@ BiMamba2, implemented solely using PyTorch, provides N-dimensional support, incl
 -  ❌  Cannot export to torch.jit.scipt or onnx formats
 -  ❌  Not supporting data formats such as 1d, 3d, and other dimensions
 
-## [ex-vssd.py](ex-vssd.py) New feature (updated on August 22, 2024)
--  ✅  Compatible with all features in ex-vssd.py
+## [ex-vssd.py](ex-vssd.py) New feature (updated on August 22, 2024) 
+-  ✅  More readable (with code optimization for vssd_torch)
 -  ✅  Support exporting to scientific and onnx formats
+-  ✅  Compatible with all features in ex-vssd.py
 -  ❌  Not supporting data formats such as 1d, 3d, and other dimensions
 
 ## Reminder
