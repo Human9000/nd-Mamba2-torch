@@ -869,3 +869,12 @@ class Backbone_VMAMBA2(VMAMBA2):
             return x
 
         return outs
+    
+    
+
+if __name__ == '__main__':
+    bakcbone = Backbone_VMAMBA2(linear_attn_duality=True, ssd_chunk_size=32).cuda()
+    x = torch.randn(1, 3, 32 * 64, 32 * 16).cuda()
+    ys = bakcbone(x)
+    for i, y in enumerate(ys):
+        print(i, y.shape)
