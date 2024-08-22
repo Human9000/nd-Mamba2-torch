@@ -39,6 +39,6 @@ BiMamba2, implemented solely using PyTorch, provides N-dimensional support, incl
    
 ## Thanks
 * [Albert Gu], [Tri Dao] [state-spaces/mamba]( https://github.com/state-spaces/mamba ) - authors of the Mamba-2 architecture
-* [Yuheng Shi], [Minjing Dong] [YuHengsss/VSSD]( https://github.com/state-spaces/mamba ) - authors of the vssd architecture
+* [Yuheng Shi], [Minjing Dong] [YuHengsss/VSSD]( https://github.com/YuHengsss/VSSD ) - authors of the vssd architecture
 * [Thomas] - author of [tommyip/mamba2-minimal]( https://github.com/tommyip/mamba2-minimal ),  who inspired this repo
  
