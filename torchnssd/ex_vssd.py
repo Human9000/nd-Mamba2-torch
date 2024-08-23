@@ -655,7 +655,7 @@ class VMAMBA2Block(nn.Module):
 
     Args:
         dim (int): Number of input channels.
-        input_resolution (tuple[int]): Input resulotion.
+        # input_resolution (tuple[int]): Input resulotion.
         num_heads (int): Number of attention heads.
         mlp_ratio (float): Ratio of mlp hidden dim to embedding dim.
         qkv_bias (bool, optional): If True, add a learnable bias to query, key, value. Default: True
@@ -665,7 +665,7 @@ class VMAMBA2Block(nn.Module):
         norm_layer (nn.Module, optional): Normalization layer.  Default: nn.LayerNorm
     """
 
-    def __init__(self, dim, input_resolution, num_heads, mlp_ratio=4., qkv_bias=True, drop=0., drop_path=0.,
+    def __init__(self, dim, input_resolution, num_heads, mlp_ratio=4., drop=0., drop_path=0.,
                  act_layer=nn.GELU, norm_layer=nn.LayerNorm, ssd_expansion=2, ssd_ngroups=1, ssd_chunk_size=256,
                  linear_attn_duality=False, d_state=64, **kwargs):
         super().__init__()
@@ -688,11 +688,11 @@ class VMAMBA2Block(nn.Module):
         self.norm2 = norm_layer(dim)
         self.mlp = Mlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=drop)
 
-    def forward(self, x, H: int, W: int):
+    def forward(self, x, H: int=0, W: int=0):
         B, L, C = x.shape
-        # if H & W is None:
-        #     H, W = self.input_resolution
-        #     assert L == H * W, "input feature has wrong size"
+        if H * W ==0:
+            H, W = self.input_resolution
+            assert L == H * W, "input feature has wrong size"
 
         x = x + self.cpe1(x.reshape(B, H, W, C).permute(0, 3, 1, 2)).flatten(2).permute(0, 2, 1)
         shortcut = x
@@ -739,7 +739,9 @@ class BasicLayer(nn.Module):
 
         # build blocks
         self.blocks = nn.ModuleList([
-            VMAMBA2Block(dim=dim, input_resolution=input_resolution, num_heads=num_heads,
+            VMAMBA2Block(dim=dim,
+                         input_resolution=input_resolution,
+                         num_heads=num_heads,
                          mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, drop=drop,
                          drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path, norm_layer=norm_layer,
                          ssd_expansion=ssd_expansion, ssd_ngroups=ssd_ngroups, ssd_chunk_size=ssd_chunk_size,
@@ -759,7 +761,7 @@ class BasicLayer(nn.Module):
             y = self.downsample(x, H, W)
         else:
             y = x
-        return x,y
+        return x, y
 
     def extra_repr(self) -> str:
         return f"dim={self.dim}, input_resolution={self.input_resolution}, depth={self.depth}"
@@ -915,7 +917,7 @@ class Backbone_VMAMBA2(VMAMBA2):
 
         self.out_indices = out_indices
         self.norm_layers = nn.ModuleList(
-            [norm_layer(self.layers[i].dim) for i in range(0, out_indices[-1]+1)]
+            [norm_layer(self.layers[i].dim) for i in range(0, out_indices[-1] + 1)]
         )
         # self.layer_names = [f'norm{i}' for i in out_indices]
         # for i in out_indices:
@@ -948,7 +950,7 @@ class Backbone_VMAMBA2(VMAMBA2):
         outs = []
 
         for i, (norm_layer, layer) in enumerate(zip(self.norm_layers, self.layers)):
-            o,x = layer(x, H, W)
+            o, x = layer(x, H, W)
             if i in self.out_indices:
                 out = norm_layer(o)
                 B, L, C = out.shape
@@ -975,6 +977,7 @@ def test_export_onnx(net, x):
                       dynamic_axes={'input': {0: 'batch_size'},  # 可变维度的字典
                                     'output': {0: 'batch_size'}})
 
+
 if __name__ == '__main__':
     backbone = Backbone_VMAMBA2(linear_attn_duality=False, ssd_chunk_size=32).cuda()
     backbone.eval()
@@ -989,6 +992,7 @@ if __name__ == '__main__':
     # for i, y in enumerate(ys):
     #     print(i, y.shape)
     # torch.jit.script(net)
+
     backbone_script = torch.jit.script(backbone)
     torch.jit.save(backbone_script, "backbone.pt")
     test_export_onnx(backbone, x)

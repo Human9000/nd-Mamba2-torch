@@ -416,7 +416,7 @@ if __name__ == '__main__':
     x1 = torch.randn(1, 64, 32).cuda() # 1d
     x2 = torch.randn(1, 64, 32, 77).cuda() # 2d
     x3 = torch.randn(1, 64, 32, 77, 25).cuda() # 3d
-    x4 = torch.randn(1, 64, 32, 77, 25, 15).cuda() # 4d
+    x4 = torch.randn(1, 64, 12, 17, 15, 15).cuda() # 4d
 
     # 测试
     y1 = net_n(x1)

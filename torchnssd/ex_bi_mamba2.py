@@ -204,7 +204,9 @@ class BiMamba2_2D(_BiMamba2):
         x2 = self.mamba2_back(x.flip(1)).flip(1)
         x = x1 + x2
         x = self.fc_out(x)  # 调整通道数为目标通道数
-        x = x.permute(0, 3, 1, 2).reshape(_b, _c, _h, _w, )
+        x = x.reshape(_b, _h, _w, -1, )
+        x = x.permute(0, 3, 1, 2)
+        x = x.reshape(_b, -1, _h, _w, )
         x = x[:, :, :h, :w]  # 截取原图大小
         return x
 
@@ -226,7 +228,9 @@ class BiMamba2_3D(_BiMamba2):
         x2 = self.mamba2_back(x.flip(1)).flip(1)
         x = x1 + x2
         x = self.fc_out(x)  # 调整通道数为目标通道数
-        x = x.permute(0, 4, 1, 2, 4).reshape(_b, _c, _d, _h, _w, )
+        x = x.reshape(_b, _d, _h, _w, -1)
+        x = x.permute(0, 4, 1, 2, 3)
+        x=x.reshape(_b, -1, _d, _h, _w, )
         x = x[:, :, :d, :h, :w]  # 截取原图大小
         return x
 
@@ -237,7 +241,7 @@ class BiMamba2(_BiMamba2):
 
     def forward(self, x):
         size = x.shape[2:]
-        out_size =list( x.shape)
+        out_size = list(x.shape)
         out_size[1] = -1
 
         x = torch.flatten(x, 2)  # b c size
@@ -252,7 +256,6 @@ class BiMamba2(_BiMamba2):
         x = self.fc_out(x)  # 调整通道数为目标通道数
         x = x.transpose(1, 2)  # 转成 1d 信号
         x = x[:, :, :l]  # 截取原图大小
-        # x = torch.unflatten(x, 2, size)
         x = x.reshape(out_size)
 
         return x
@@ -266,6 +269,7 @@ def test_export_jit_script(net, x):
     y = net2(x)
     print(y.shape)
 
+
 def test_export_onnx(net, x):
     torch.onnx.export(net,
                       x,
@@ -278,13 +282,20 @@ def test_export_onnx(net, x):
                       dynamic_axes={'input': {0: 'batch_size'},  # 可变维度的字典
                                     'output': {0: 'batch_size'}})
 
+
 if __name__ == '__main__':
     # 通用的多维度双向mamba2
-    net_n = BiMamba2(61, 128, 32).cuda()
-    # net_n = BiMamba2_1D(61, 128, 32).cuda()
-    net_n.eval()
+    from torchnssd import (
+        export_jit_script,
+        export_onnx,
+        statistics,
+        test_run,
+    )
 
+    net_n = BiMamba2_1D(61, 128, 32).cuda()
+    net_n.eval()
     x = torch.randn(1, 61, 63).cuda()
-    # y = net_n(x)
-    test_export_jit_script(net_n, x)
-    test_export_onnx(net_n, x)
+    export_jit_script(net_n)
+    export_onnx(net_n, x)
+    test_run(net_n, x)
+    statistics(net_n, (61, 63))
