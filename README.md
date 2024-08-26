@@ -36,8 +36,12 @@ BiMamba2, implemented solely using PyTorch, provides N-dimensional support, incl
 
 ## Reminder
 *If you want faster speed, you can replace Mamba2 in this project with Mamba2's official Cuda acceleration implementation and install various dependency packages according to official requirements. This will not affect the project's support for multi-dimensional data, but it will have an impact on the export of the model*
- 
-   
+
+![image](https://github.com/user-attachments/assets/c852e0cc-0f5a-4edb-b845-9a2d10efcbdb)
+
+![image](https://github.com/user-attachments/assets/4dff7826-6ddf-44d9-810b-6a9dd8f6a349)
+
+
 ## Thanks
 * [Albert Gu], [Tri Dao] [state-spaces/mamba]( https://github.com/state-spaces/mamba ) - authors of the Mamba-2 architecture
 * [Yuheng Shi], [Minjing Dong] [YuHengsss/VSSD]( https://github.com/YuHengsss/VSSD ) - authors of the vssd architecture
