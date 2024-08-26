@@ -16,7 +16,7 @@ BiMamba2, implemented solely using PyTorch, provides N-dimensional support, incl
 -  ✅  More readable (with a significant amount of redundant code removed)
 -  ✅  Compatible with all features of nd_mamba2.py
   
-## [ex_bi_mamba_2ac.py](torchnssd/ex_bi_mamba_2ac.py) New feature (updated on August 20, 2024)
+## [ex_bi_mamba2_ac.py](torchnssd/ex_bi_mamba2_ac.py) New feature (updated on August 20, 2024)
 -  ✅  Better 2D image semantic expression (using asymmetric convolution strategy to optimize 2D)
 -  ✅  Compatible with all features in ex-bi-umamba2.py
 -  ❌  Not supporting data formats such as 1d, 3d, and other dimensions

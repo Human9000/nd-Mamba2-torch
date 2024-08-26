@@ -14,7 +14,7 @@
 - ✅ 更易阅读 (删除了大量冗余代码) 
 - ✅ 兼容nd_mamba2.py的所有特点
   
-## [ex_bi_mamba_2ac.py](torchnssd/ex_bi_mamba_2ac.py)新特性（更新时间：2024/08/20）
+## [ex_bi_mamba2_ac.py](torchnssd/ex_bi_mamba2_ac.py)新特性（更新时间：2024/08/20）
 - ✅ 更好的2d图像语义表达（使用非对称卷积的策略优化2d）
 - ✅ 兼容ex_bi_mamba2.py中的所有特点
 - ❌ 不支持1d、3d等其他维度的数据格式
