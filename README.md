@@ -1,15 +1,14 @@
 # Nd-Mamba2 for any dimension by pytorch
 BiMamba2, implemented solely using PyTorch, provides N-dimensional support, including support for 1d, 2d, and 3d data. With BiMamba2, you can easily stitch it into any model to improve accuracy.
 
-## mamba2 
+[中文README](README_中文.md)
 
+## mamba2 
 ![image](https://github.com/user-attachments/assets/c852e0cc-0f5a-4edb-b845-9a2d10efcbdb)
 
 ## ssd
-
 ![image](https://github.com/user-attachments/assets/4dff7826-6ddf-44d9-810b-6a9dd8f6a349)
 
-[中文README](README_中文.md)
 
 ## [nd_mamba2.py](torchnssd/nd_mamba2.py) Features (Updated on August 2, 2024)
 -  ✅  Support customized 1D data (batch, channel, length)
