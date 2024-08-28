@@ -1,19 +1,21 @@
 import torch
 
-from torchnssd import \
-    (BiMamba2_1D,
-     BiMamba2,
-     BiMamba2_2D,
-     BiMamba2_3D,
-     Mamba2,
-     Backbone_VMAMBA2,
-     VMAMBA2Block,
-     BiMamba2Ac2d,
-     export_jit_script,
-     export_onnx,
-     statistics,
-     test_run,
-     )
+from torchnssd import (
+    BiMamba2_1D,
+    BiMamba2,
+    BiMamba2_2D,
+    BiMamba2_3D,
+    Mamba2,
+    Backbone_VMAMBA2,
+    VMAMBA2Block,
+    BiMamba2Ac2d,
+    ClsVSSD,
+    SegVSSD,
+    export_jit_script,
+    export_onnx,
+    statistics,
+    test_run,
+)
 
 
 def test_bimamba2_1d():
@@ -114,12 +116,36 @@ def test_bimamba2ac2d():
     statistics(net, (61, 63, 63))
 
 
+def test_segvssd():
+    # 测试
+    seg = SegVSSD(fact=(2, 2), in_chans=3, out_channel=2).cuda()
+    seg.eval()
+    x = torch.randn(1, 3, 256, 256).cuda()
+    export_jit_script(seg, root='../export_weights')
+    export_onnx(seg, x, root='../export_weights')
+    test_run(seg, x)
+    statistics(seg, tuple(x.shape[1:]))
+
+
+def test_clsvssd():
+    cls = ClsVSSD(fact=(2, 2), in_chans=3, out_channel=1024).cuda()
+    cls.eval()
+    x = torch.randn(1, 3, 256, 256).cuda()
+    # 测试
+    export_jit_script(cls, root='../export_weights')
+    export_onnx(cls, x, root='../export_weights')
+    test_run(cls, x)
+    statistics(cls, tuple(x.shape[1:]))
+
+
 if __name__ == '__main__':
-    test_bimamba2()
-    test_bimamba2_1d()
-    test_bimamba2_2d()
-    test_bimamba2_3d()
-    test_mamba2()
-    test_backbone_vmamba2()
-    test_vmamamba2block()
-    test_bimamba2ac2d()
+    # test_bimamba2()
+    # test_bimamba2_1d()
+    # test_bimamba2_2d()
+    # test_bimamba2_3d()
+    # test_mamba2()
+    # test_backbone_vmamba2()
+    # test_vmamamba2block()
+    # test_bimamba2ac2d()
+    test_clsvssd()
+    test_segvssd()

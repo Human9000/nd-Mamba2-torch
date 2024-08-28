@@ -17,5 +17,9 @@ from .ex_vssd import (
     Backbone_VMAMBA2,  # (推荐)
     VMAMBA2Block,  # (推荐)
 )
+from .ex_vssd_cls_seg import(
+    SegVSSD,
+    ClsVSSD,
+)
 
 from .ex_bi_mamba2_ac import BiMamba2Ac2d  # (推荐)

@@ -1,0 +1,1217 @@
+from typing import List
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from timm.models.layers import DropPath, to_2tuple, trunc_normal_
+
+import math
+
+
+def b_l_hp2b_l_h_p(x, p: int):
+    b, l, hp = x.shape
+    h = hp // p
+    return x.reshape(b, l, h, p)
+
+
+def b_l_gn2b_l_g_n(x, g: int):
+    b, l, gn = x.shape
+    n = gn // g
+    return x.reshape(b, l, g, n)
+
+
+def b_l_h_p2b_l_hp(x):
+    b, l, h, p = x.shape
+    return x.reshape(b, l, h * p)
+
+
+def b_n_hd2b_h_n_d(x, h: int):
+    b, n, hd = x.shape
+    d = hd // h
+    return x.reshape(b, n, h, d).transpose(1, 2)
+
+
+def segsum(x):
+    """More stable segment sum calculation."""
+    T = x.size(-1)
+    x = x[..., None].repeat(1, 1, 1, 1, T)
+    mask = torch.tril(torch.ones(T, T, device=x.device,
+                      dtype=torch.bool), diagonal=-1)
+    x = x.masked_fill(~mask, 0)
+    x_segsum = torch.cumsum(x, dim=-2)
+    mask = torch.tril(torch.ones(T, T, device=x.device,
+                      dtype=torch.bool), diagonal=0)
+    x_segsum = x_segsum.masked_fill(~mask, -torch.inf)
+    return x_segsum
+
+
+def ssd_minimal_discrete(X, A, B, C, block_len: int, initial_states):
+    """
+    Arguments:
+        X: (batch, length, n_heads, d_head)
+        A: (batch, length, n_heads)
+        B: (batch, length, n_heads, d_state)
+        C: (batch, length, n_heads, d_state)
+    Return:
+        Y: (batch, length, n_heads, d_head)
+    """
+    # return X, initial_states
+    # assert X.dtype == A.dtype == B.dtype == C.dtype
+    # assert X.shape[1] % block_len == 0
+
+    # Rearrange into blocks/chunks
+    X = X.reshape(X.shape[0], X.shape[1] // block_len,
+                  block_len, X.shape[2], X.shape[3], )
+    B = B.reshape(B.shape[0], B.shape[1] // block_len,
+                  block_len, B.shape[2], B.shape[3], )
+    C = C.reshape(C.shape[0], C.shape[1] // block_len,
+                  block_len, C.shape[2], C.shape[3], )
+    A = A.reshape(A.shape[0], A.shape[1] // block_len, block_len, A.shape[2])
+    A = A.permute(0, 3, 1, 2)
+
+    A_cumsum = torch.cumsum(A, dim=-1)
+
+    # 1. Compute the output for each intra-chunk (diagonal blocks)
+    L = torch.exp(segsum(A))
+    Y_diag = torch.einsum("bclhn,bcshn,bhcls,bcshp->bclhp", C, B, L, X)
+
+    # 2. Compute the state for each intra-chunk
+    # (right term of low-rank factorization of off-diagonal blocks; B terms)
+    decay_states = torch.exp((A_cumsum[:, :, :, -1:] - A_cumsum))
+    states = torch.einsum("bclhn,bhcl,bclhp->bchpn", B, decay_states, X)
+
+    # 3. Compute the inter-chunk SSM recurrence; produces correct SSM states at chunk boundaries
+    # (middle term of factorization of off-diag blocks; A terms)
+    if initial_states.shape[0] == 0:  # 替代None
+        initial_states = torch.zeros_like(states[:, :1])
+    states = torch.cat([initial_states, states], dim=1)
+    decay_chunk = torch.exp(segsum(F.pad(A_cumsum[:, :, :, -1], (1, 0))))[0]
+    new_states = torch.einsum("bhzc,bchpn->bzhpn", decay_chunk, states)
+    states, final_state = new_states[:, :-1], new_states[:, -1]
+
+    # 4. Compute state -> output conversion per chunk
+    # (left term of low-rank factorization of off-diagonal blocks; C terms)
+    state_decay_out = torch.exp(A_cumsum)
+    Y_off = torch.einsum('bclhn,bchpn,bhcl->bclhp', C, states, state_decay_out)
+
+    # Add output of intra-chunk and inter-chunk terms (diagonal and off-diagonal blocks)
+    Y = Y_diag + Y_off
+    Y = Y.reshape(Y.shape[0], Y.shape[1] * Y.shape[2],
+                  Y.shape[3], Y.shape[4], )
+
+    return Y, final_state
+
+
+def ssd_minimal_discrete_no_init(X, A, B, C, block_len: int):
+    """
+    Arguments:
+        X: (batch, length, n_heads, d_head)
+        A: (batch, length, n_heads)
+        B: (batch, length, n_heads, d_state)
+        C: (batch, length, n_heads, d_state)
+    Return:
+        Y: (batch, length, n_heads, d_head)
+    """
+    # return X, initial_states
+    # assert X.dtype == A.dtype == B.dtype == C.dtype
+    # assert X.shape[1] % block_len == 0
+    # Rearrange into blocks/chunks
+    X = X.reshape(X.shape[0], X.shape[1] // block_len,
+                  block_len, X.shape[2], X.shape[3], )
+    B = B.reshape(B.shape[0], B.shape[1] // block_len,
+                  block_len, B.shape[2], B.shape[3], )
+    C = C.reshape(C.shape[0], C.shape[1] // block_len,
+                  block_len, C.shape[2], C.shape[3], )
+    A = A.reshape(A.shape[0], A.shape[1] // block_len, block_len, A.shape[2])
+    A = A.permute(0, 3, 1, 2)
+
+    A_cumsum = torch.cumsum(A, dim=-1)
+
+    # 1. Compute the output for each intra-chunk (diagonal blocks)
+    L = torch.exp(segsum(A))
+    Y_diag = torch.einsum("bclhn,bcshn,bhcls,bcshp->bclhp", C, B, L, X)
+
+    # 2. Compute the state for each intra-chunk
+    # (right term of low-rank factorization of off-diagonal blocks; B terms)
+    decay_states = torch.exp((A_cumsum[:, :, :, -1:] - A_cumsum))
+    states = torch.einsum("bclhn,bhcl,bclhp->bchpn", B, decay_states, X)
+
+    # 3. Compute the inter-chunk SSM recurrence; produces correct SSM states at chunk boundaries
+    # (middle term of factorization of off-diag blocks; A terms)
+    initial_states = torch.zeros_like(states[:, :1])
+    states = torch.cat([initial_states, states], dim=1)
+    decay_chunk = torch.exp(segsum(F.pad(A_cumsum[:, :, :, -1], (1, 0))))[0]
+    new_states = torch.einsum("bhzc,bchpn->bzhpn", decay_chunk, states)
+    states, final_state = new_states[:, :-1], new_states[:, -1]
+
+    # 4. Compute state -> output conversion per chunk
+    # (left term of low-rank factorization of off-diagonal blocks; C terms)
+    state_decay_out = torch.exp(A_cumsum)
+    Y_off = torch.einsum('bclhn,bchpn,bhcl->bclhp', C, states, state_decay_out)
+
+    # Add output of intra-chunk and inter-chunk terms (diagonal and off-diagonal blocks)
+    Y = Y_diag + Y_off
+    Y = Y.reshape(Y.shape[0], Y.shape[1] * Y.shape[2],
+                  Y.shape[3], Y.shape[4], )
+
+    return Y, final_state
+
+
+def mini_chunk_scan_combined(X, dt, A, B, C, chunk_size: int, initial_states):
+    # print("Using mini_chunk_scan_combined", X.shape,  A.shape, B.shape, C.shape)
+    # return X
+    # Y, final_state = ssd_minimal_discrete(X * dt.unsqueeze(-1), A * dt, B, C, chunk_size, initial_states)
+    Y, final_state = ssd_minimal_discrete_no_init(
+        X * dt.unsqueeze(-1), A * dt, B, C, chunk_size)
+    return Y
+
+
+# class tTensor(torch.Tensor):
+#     @property
+#     def shape(self):
+#         shape = super().shape
+#         return tuple([int(s) for s in shape])
+
+
+# to_ttensor = lambda *args: tuple([tTensor(x) for x in args]) if len(args) > 1 else tTensor(args[0])
+# to_ttensor = lambda *args: tuple([tTensor(x) for x in args]) if len(args) > 1 else tTensor(args[0])
+# lambda 转成 def
+# def to_ttensor(arg):
+#     return tTensor(arg)
+
+
+class Mlp(nn.Module):
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
+        super().__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        self.fc1 = nn.Linear(in_features, hidden_features)
+        self.act = act_layer()
+        self.fc2 = nn.Linear(hidden_features, out_features)
+        self.drop = nn.Dropout(drop)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.drop(x)
+        x = self.fc2(x)
+        x = self.drop(x)
+        return x
+
+
+class ConvLayer(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=0, dilation=1, groups=1,
+                 bias=True, dropout=0, norm=nn.BatchNorm2d, act_func=nn.ReLU):
+        super(ConvLayer, self).__init__()
+        self.dropout = nn.Dropout2d(
+            dropout, inplace=False) if dropout > 0 else nn.Identity()
+        self.conv = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=(kernel_size, kernel_size),
+            stride=(stride, stride),
+            padding=(padding, padding),
+            dilation=(dilation, dilation),
+            groups=groups,
+            bias=bias,
+        )
+        self.norm = norm(num_features=out_channels) if norm else nn.Identity()
+        self.act = act_func() if act_func else nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.dropout(x)
+        x = self.conv(x)
+        x = self.norm(x)
+        x = self.act(x)
+        return x
+
+
+class Stem(nn.Module):
+    r""" Stem
+
+    Args:
+        img_size (int): Image size.  Default: 224.
+        patch_size (int): Patch token size. Default: 4.
+        in_chans (int): Number of input image channels. Default: 3.
+        embed_dim (int): Number of linear projection output channels. Default: 96.
+    """
+
+    def __init__(self, img_size=224, patch_size=4, in_chans=3, embed_dim=96):
+        super().__init__()
+        img_size = to_2tuple(img_size)
+        patch_size = to_2tuple(patch_size)
+        patches_resolution = [img_size[0] //
+                              patch_size[0], img_size[1] // patch_size[1]]
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.patches_resolution = patches_resolution
+        self.num_patches = patches_resolution[0] * patches_resolution[1]
+
+        self.in_chans = in_chans
+        self.embed_dim = embed_dim
+
+        self.conv1 = ConvLayer(in_chans, embed_dim // 2,
+                               kernel_size=3, stride=2, padding=1, bias=False)
+        self.conv2 = nn.Sequential(
+            ConvLayer(embed_dim // 2, embed_dim // 2, kernel_size=3,
+                      stride=1, padding=1, bias=False),
+            ConvLayer(embed_dim // 2, embed_dim // 2, kernel_size=3,
+                      stride=1, padding=1, bias=False, act_func=None)
+        )
+        self.conv3 = nn.Sequential(
+            ConvLayer(embed_dim // 2, embed_dim * 4, kernel_size=3,
+                      stride=2, padding=1, bias=False),
+            ConvLayer(embed_dim * 4, embed_dim, kernel_size=1,
+                      bias=False, act_func=None)
+        )
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        # assert H == self.img_size[0] and W == self.img_size[1], \
+        #     f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+        x = self.conv1(x)
+        x = self.conv2(x) + x
+        x = self.conv3(x)
+        x = x.flatten(2).transpose(1, 2)
+        return x
+
+
+class SimpleStem(nn.Module):
+    r'''
+    Simple Stem
+
+    '''
+
+    def __init__(self, img_size=224, patch_size=4, in_chans=3, embed_dim=96):
+        super().__init__()
+        img_size = to_2tuple(img_size)
+        patch_size = to_2tuple(patch_size)
+        patches_resolution = [img_size[0] //
+                              patch_size[0], img_size[1] // patch_size[1]]
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.patches_resolution = patches_resolution
+        self.num_patches = patches_resolution[0] * patches_resolution[1]
+
+        self.in_chans = in_chans
+        self.embed_dim = embed_dim
+        self.norm = nn.LayerNorm(embed_dim)
+        self.conv1 = ConvLayer(in_chans, embed_dim,
+                               kernel_size=4, stride=4, padding=0, bias=False)
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        # assert H == self.img_size[0] and W == self.img_size[1], \
+        #     f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+        # padding
+
+        x = self.norm(self.conv1(x).flatten(2).transpose(1, 2))
+        return x
+
+
+class PatchMerging(nn.Module):
+    r""" Patch Merging Layer.
+
+    Args:
+        input_resolution (tuple[int]): Resolution of input feature.
+        dim (int): Number of input channels.
+    """
+
+    def __init__(self, input_resolution, dim, ratio=4.0):
+        super().__init__()
+        self.input_resolution = input_resolution
+        self.dim = dim
+        in_channels = dim
+        out_channels = 2 * dim
+        self.conv = nn.Sequential(
+            ConvLayer(in_channels, int(out_channels * ratio),
+                      kernel_size=1, norm=None),
+            ConvLayer(int(out_channels * ratio), int(out_channels * ratio), kernel_size=3, stride=2, padding=1, groups=int(out_channels * ratio),
+                      norm=None),
+            ConvLayer(int(out_channels * ratio), out_channels,
+                      kernel_size=1, act_func=None)
+        )
+
+    def forward(self, x, H: int, W: int):
+        """
+        x: B, H*W, C
+        """
+        B, L, C = x.shape
+        if H & W is None:
+            H, W = self.input_resolution
+            assert L == H * W, "input feature has wrong size"
+        # assert H % 2 == 0 and W % 2 == 0, f"x size ({H}*{W}) are not even."
+        x = self.conv(x.reshape(B, H, W, C).permute(
+            0, 3, 1, 2)).flatten(2).permute(0, 2, 1)
+        return x
+
+
+class SimplePatchMerging(nn.Module):
+    r""" Simple Patch Merging Layer.
+
+        Args:
+            input_resolution (tuple[int]): Resolution of input feature.
+            dim (int): Number of input channels.
+        """
+
+    def __init__(self, input_resolution, dim, ratio=4.0):
+        super().__init__()
+        self.input_resolution = input_resolution
+        self.dim = dim
+        in_channels = dim
+        out_channels = 2 * dim
+        self.conv = nn.Sequential(
+            ConvLayer(in_channels, int(out_channels), kernel_size=3,
+                      stride=2, padding=1, norm=None),
+        )
+        self.norm = nn.LayerNorm(out_channels)
+
+    def forward(self, x, H: int, W: int):
+        """
+        x: B, H*W, C
+        """
+        B, L, C = x.shape
+        if H & W is None:
+            H, W = self.input_resolution
+            assert L == H * W, "input feature has wrong size"
+        # assert H % 2 == 0 and W % 2 == 0, f"x size ({H}*{W}) are not even."
+        x = self.conv(x.reshape(B, H, W, C).permute(
+            0, 3, 1, 2)).flatten(2).permute(0, 2, 1)
+        x = self.norm(x)
+        return x
+
+
+def segsum_unstable(x):
+    """Naive segment sum calculation."""
+    T = x.size(-1)
+    x_cumsum = torch.cumsum(x, dim=-1)
+    x_segsum = x_cumsum[..., :, None] - x_cumsum[..., None, :]
+    mask = torch.tril(torch.ones(
+        T, T, device=x.device, dtype=bool), diagonal=0)
+    x_segsum = x_segsum.masked_fill(~mask, -torch.inf)
+    return x_segsum
+
+
+class StandardAttention(nn.Module):
+    def __init__(self, dim, heads=8, dim_head=64, dropout=0., **kwargs):
+        super().__init__()
+        inner_dim = dim_head * heads
+        self.heads = heads
+        self.scale = dim_head ** -0.5
+        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
+        self.to_out = nn.Linear(inner_dim, dim)
+        self.dropout = nn.Dropout(dropout)
+        self.inner_dim = inner_dim
+
+    def forward(self, x, H: int, W: int):
+        # qkv = self.to_qkv(x).chunk(3, dim=-1)
+        # q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), qkv)
+
+        q, k, v = self.to_qkv(x).chunk(3, dim=-1)
+        q = b_n_hd2b_h_n_d(q, h=self.heads)
+        k = b_n_hd2b_h_n_d(k, h=self.heads)
+        v = b_n_hd2b_h_n_d(v, h=self.heads)
+
+        dots = torch.einsum('bhid,bhjd->bhij', q, k) * self.scale
+        attn = dots.softmax(dim=-1)
+        attn = self.dropout(attn)
+        out = torch.einsum('bhij,bhjd->bhid', attn, v)
+        # out = rearrange(out, 'b h n d -> b n (h d)')
+        b, h, n, d = out.shape
+        out = out.transpose(1, 2).reshape(b, n, h * d)
+
+        return self.to_out(out)
+
+
+class Mamba2(nn.Module):
+    def __init__(
+            self,
+            d_model,
+            d_conv=3,  # default to 3 for 2D
+            conv_init=None,
+            expand=2,
+            headdim=64,  # default to 64
+            ngroups=1,
+            A_init_range=(1, 16),
+            dt_min=0.001,
+            dt_max=0.1,
+            dt_init_floor=1e-4,
+            dt_limit=(0.0, float("inf")),
+            learnable_init_states=False,
+            activation="silu",  # default to silu
+            bias=False,
+            conv_bias=True,
+            # Fused kernel and sharding options
+            chunk_size=256,
+            use_mem_eff_path=False,  # default to False, for custom implementation
+            layer_idx=None,  # Absorb kwarg for general module
+            device=None,
+            dtype=None,
+            linear_attn_duality=False,
+            d_state=64,
+            **kwargs
+    ):
+        factory_kwargs = {"device": device, "dtype": dtype}
+        super().__init__()
+        self.d_model = d_model
+        self.d_conv = d_conv
+        self.conv_init = conv_init
+        self.expand = expand
+        self.d_inner = int(self.expand * self.d_model)
+        self.headdim = headdim
+        self.d_state = d_state
+        if ngroups == -1:
+            ngroups = self.d_inner // self.headdim  # equivalent to multi-head attention
+        self.ngroups = ngroups
+        assert self.d_inner % self.headdim == 0
+        self.nheads = self.d_inner // self.headdim
+        self.dt_limit = dt_limit
+        self.learnable_init_states = learnable_init_states
+        self.activation = activation
+        # convert chunk_size to triton.language.int32
+        # torch.tensor(chunk_size,dtype=torch.int32)
+        self.chunk_size = chunk_size
+        self.use_mem_eff_path = use_mem_eff_path
+        self.layer_idx = layer_idx
+        # default to False, ablation for linear attn duality
+        self.ssd_positve_dA = kwargs.get('ssd_positve_dA', True)
+        # Order: [z, x, B, C, dt]
+        d_in_proj = 2 * self.d_inner + 2 * self.ngroups * self.d_state + self.nheads
+        self.in_proj = nn.Linear(self.d_model, int(
+            d_in_proj), bias=bias, **factory_kwargs)  #
+
+        conv_dim = self.d_inner + 2 * self.ngroups * self.d_state
+
+        self.conv2d = nn.Conv2d(
+            in_channels=conv_dim,
+            out_channels=conv_dim,
+            groups=conv_dim,
+            bias=conv_bias,
+            kernel_size=d_conv,
+            padding=(d_conv - 1) // 2,
+            **factory_kwargs,
+        )
+        if self.conv_init is not None:
+            nn.init.uniform_(self.conv1d.weight, -
+                             self.conv_init, self.conv_init)
+        # self.conv1d.weight._no_weight_decay = True
+
+        # if self.learnable_init_states:
+        self.init_states = nn.Parameter(torch.zeros(
+            self.nheads, self.headdim, self.d_state, **factory_kwargs))
+        self.init_states._no_weight_decay = True
+
+        self.act = nn.SiLU()
+
+        # Initialize log dt bias
+        dt = torch.exp(
+            torch.rand(self.nheads, **factory_kwargs) *
+            (math.log(dt_max) - math.log(dt_min))
+            + math.log(dt_min)
+        )
+        dt = torch.clamp(dt, min=dt_init_floor)
+        # Inverse of softplus: https://github.com/pytorch/pytorch/issues/72759
+        inv_dt = dt + torch.log(-torch.expm1(-dt))
+        self.dt_bias = nn.Parameter(inv_dt)
+        # Just to be explicit. Without this we already don't put wd on dt_bias because of the check
+        # name.endswith("bias") in param_grouping.py
+        self.dt_bias._no_weight_decay = True
+
+        # A parameter
+        assert A_init_range[0] > 0 and A_init_range[1] >= A_init_range[0]
+        A = torch.empty(self.nheads, dtype=torch.float32,
+                        device=device).uniform_(*A_init_range)
+        A_log = torch.log(A).to(dtype=dtype)
+        self.A_log = nn.Parameter(A_log)
+        # self.register_buffer("A_log", torch.zeros(self.nheads, dtype=torch.float32, device=device), persistent=True)
+        self.A_log._no_weight_decay = True
+
+        # D "skip" parameter
+        self.D = nn.Parameter(torch.ones(self.nheads, device=device))
+        self.D._no_weight_decay = True
+
+        # modified from RMSNormGated to layer norm
+        # assert RMSNormGated is not None
+        # self.norm = RMSNormGated(self.d_inner, eps=1e-5, norm_before_gate=False, **factory_kwargs)
+        self.norm = nn.LayerNorm(self.d_inner)
+        self.out_proj = nn.Linear(
+            self.d_inner, self.d_model, bias=bias, **factory_kwargs)
+
+        # linear attention duality
+        self.linear_attn_duality = linear_attn_duality
+        self.kwargs = kwargs
+        self.bidirectional = True if kwargs.get(
+            'bidirectional') != None else False
+
+    def non_casual_linear_attn(self, x, dt, A, B, C, D, H: int, W: int):
+        '''
+        non-casual attention duality of mamba v2
+        x: (B, L, H, D), equivalent to V in attention
+        dt: (B, L, nheads)
+        A: (nheads) or (d_inner, d_state)
+        B: (B, L, d_state), equivalent to K in attention
+        C: (B, L, d_state), equivalent to Q in attention
+        D: (nheads), equivalent to the skip connection
+        '''
+
+        batch, seqlen, head, dim = x.shape
+        dstate = B.shape[2]
+        V = x.permute(0, 2, 1, 3)  # (B, H, L, D)
+        dt = dt.permute(0, 2, 1)  # (B, H, L)
+        dA = dt.unsqueeze(-1) * A.view(1, -1, 1, 1).repeat(batch, 1, seqlen, 1)
+        if self.ssd_positve_dA:
+            dA = -dA
+
+        V_scaled = V * dA
+        K = B.view(batch, 1, seqlen, dstate)  # (B, 1, L, D)
+        if getattr(self, "__DEBUG__", False):
+            A_mat = dA.cpu().detach().numpy()
+            A_mat = A_mat.reshape(batch, -1, H, W)
+            setattr(self, "__data__", dict(
+                dA=A_mat, H=H, W=W, V=V, ))
+
+        if self.ngroups == 1:
+            # get kv via transpose K and V
+            KV = K.transpose(-2, -1) @ V_scaled  # (B, H, dstate, D)
+            Q = C.view(batch, 1, seqlen, dstate)  # .repeat(1, head, 1, 1)
+            x = Q @ KV  # (B, H, L, D)
+            x = x + V * D.view(1, -1, 1, 1).repeat(batch, 1, seqlen, 1)
+            x = x.permute(0, 2, 1, 3).contiguous()  # (B, L, H, D)
+        else:
+            assert head % self.ngroups == 0
+            dstate = dstate // self.ngroups
+            K = K.view(batch, 1, seqlen, self.ngroups, dstate).permute(
+                0, 1, 3, 2, 4)  # (B, 1, g, L, dstate)
+            V_scaled = V_scaled.view(
+                batch, head // self.ngroups, self.ngroups, seqlen, dim)  # (B, H//g, g, L, D)
+            Q = C.view(batch, 1, seqlen, self.ngroups, dstate).permute(
+                0, 1, 3, 2, 4)  # (B, 1, g, L, dstate)
+
+            KV = K.transpose(-2, -1) @ V_scaled  # (B, H//g, g, dstate, D)
+            x = Q @ KV  # (B, H//g, g, L, D)
+            V_skip = (V * D.view(1, -1, 1, 1).repeat(batch, 1, seqlen, 1)).view(batch, head // self.ngroups, self.ngroups, seqlen,
+                                                                                dim)  # (B, H//g, g, L, D)
+            x = x + V_skip  # (B, H//g, g, L, D)
+            x = x.permute(0, 3, 1, 2, 4).flatten(2, 3).reshape(
+                batch, seqlen, head, dim)  # (B, L, H, D)
+            x = x.contiguous()
+
+        return x
+
+    def forward(self, u, H: int, W: int):
+        return u
+        """
+        u: (B,C,H,W)
+        Returns: same shape as u
+        """
+        batch, seqlen, dim = u.shape
+
+        zxbcdt = self.in_proj(u)  # (B, L, d_in_proj)
+        A = -torch.exp(self.A_log)  # (nheads) or (d_inner, d_state)
+        # print(self.init_states.shape)
+        # initial_states = repeat(self.init_states, "... -> b ...", b=batch) if self.learnable_init_states else None
+        initial_states = self.init_states[None].repeat(
+            batch, 1, 1, 1) if self.learnable_init_states else torch.zeros(0, device=u.device)
+
+        # dt_limit_kwargs = {} if self.dt_limit == (0.0, float("inf")) else dict(dt_limit=self.dt_limit)
+
+        z, xBC, dt = torch.split(
+            zxbcdt, [self.d_inner, self.d_inner + 2 * self.ngroups * self.d_state, self.nheads], dim=-1
+        )
+        dt = F.softplus(dt + self.dt_bias)  # (B, L, nheads)
+        assert self.activation in ["silu", "swish"]
+
+        # 2D Convolution
+        xBC = xBC.view(batch, H, W, -1).permute(0, 3, 1, 2).contiguous()
+        xBC = self.act(self.conv2d(xBC))
+        xBC = xBC.permute(0, 2, 3, 1).view(batch, H * W, -1).contiguous()
+
+        # Split into 3 main branches: X, B, C
+        # These correspond to V, K, Q respectively in the SSM/attention duality
+        x, B, C = torch.split(
+            xBC, [self.d_inner, self.ngroups * self.d_state, self.ngroups * self.d_state], dim=-1)
+
+        if self.linear_attn_duality:
+            y = self.non_casual_linear_attn(
+                # rearrange(x, "b l (h p) -> b l h p", p=self.headdim),
+                x.reshape(x.shape[0], x.shape[1], x.shape[2] //
+                          self.headdim, self.headdim),
+                dt, A, B, C, self.D, H, W
+            )
+        else:
+            if self.bidirectional:
+                # assert self.ngroups == 2 #only support bidirectional with 2 groups
+                xs = b_l_hp2b_l_h_p(x, p=self.headdim).chunk(2, dim=-2)
+                Bs = b_l_gn2b_l_g_n(B, g=self.ngroups).chunk(2, dim=-2)
+                Cs = b_l_gn2b_l_g_n(C, g=self.ngroups).chunk(2, dim=-2)
+                # x = to_ttensor(rearrange(x, "b l (h p) -> b l h p", p=self.headdim)).chunk(2, dim=-2)
+                # B = to_ttensor(rearrange(B, "b l (g n) -> b l g n", g=self.ngroups)).chunk(2, dim=-2)
+                # C = to_ttensor(rearrange(C, "b l (g n) -> b l g n", g=self.ngroups)).chunk(2, dim=-2)
+                # (B, L, nheads) -> (B, L, nheads//2)*2
+                dts = dt.chunk(2, dim=-1)
+                # (nheads) -> (nheads//2)*2
+                As, Ds = A.chunk(2, dim=-1), self.D.chunk(2, dim=-1)
+
+                y_forward = mini_chunk_scan_combined(
+                    xs[0], dts[0], As[0], Bs[0], Cs[0],
+                    self.chunk_size,
+                    initial_states=initial_states
+                )
+
+                y_backward = mini_chunk_scan_combined(
+                    xs[1].flip(1),
+                    dts[1].flip(1),
+                    As[1],
+                    Bs[1].flip(1),
+                    Cs[1].flip(1),
+                    self.chunk_size,
+                    initial_states=initial_states,
+                )
+                y = torch.cat([y_forward, y_backward.flip(1)], dim=-2)
+            else:
+                y = mini_chunk_scan_combined(
+                    b_l_hp2b_l_h_p(x, p=self.headdim),
+                    dt,
+                    A,
+                    b_l_gn2b_l_g_n(B, g=self.ngroups),
+                    b_l_gn2b_l_g_n(C, g=self.ngroups),
+                    # to_ttensor(rearrange(x, "b l (h p) -> b l h p", p=self.headdim)),
+                    # to_ttensor(dt),
+                    # to_ttensor(A),
+                    # to_ttensor(rearrange(B, "b l (g n) -> b l g n", g=self.ngroups)),
+                    # to_ttensor(rearrange(C, "b l (g n) -> b l g n", g=self.ngroups)),
+                    self.chunk_size,
+                    initial_states=initial_states,
+                )
+        # y = rearrange(y, "b l h p -> b l (h p)")
+        y = b_l_h_p2b_l_hp(y)
+
+        # # Multiply "gate" branch and apply extra normalization layer
+        # y = self.norm(y, z)
+        y = self.norm(y)
+        y = y * z
+        out = self.out_proj(y)
+        return out
+
+
+#
+class VMAMBA2Block(nn.Module):
+    r""" MLLA Block.
+
+    Args:
+        dim (int): Number of input channels.
+        # input_resolution (tuple[int]): Input resulotion.
+        num_heads (int): Number of attention heads.
+        mlp_ratio (float): Ratio of mlp hidden dim to embedding dim.
+        qkv_bias (bool, optional): If True, add a learnable bias to query, key, value. Default: True
+        drop (float, optional): Dropout rate. Default: 0.0
+        drop_path (float, optional): Stochastic depth rate. Default: 0.0
+        act_layer (nn.Module, optional): Activation layer. Default: nn.GELU
+        norm_layer (nn.Module, optional): Normalization layer.  Default: nn.LayerNorm
+    """
+
+    def __init__(self, dim, input_resolution, num_heads, mlp_ratio=4., drop=0., drop_path=0.,
+                 act_layer=nn.GELU, norm_layer=nn.LayerNorm, ssd_expansion=2, ssd_ngroups=1, ssd_chunk_size=256,
+                 linear_attn_duality=False, d_state=64, **kwargs):
+        super().__init__()
+        self.dim = dim
+        self.input_resolution = input_resolution
+        self.num_heads = num_heads
+        self.mlp_ratio = mlp_ratio
+
+        self.cpe1 = nn.Conv2d(dim, dim, 3, padding=1, groups=dim)
+        self.norm1 = norm_layer(dim)
+        if kwargs.get('attn_type', 'mamba2') == 'standard':
+            self.attn = StandardAttention(
+                dim=dim, heads=num_heads, dim_head=dim // num_heads, dropout=drop)
+        elif kwargs.get('attn_type', 'mamba2') == 'mamba2':
+            self.attn = Mamba2(d_model=dim, expand=ssd_expansion, headdim=dim * ssd_expansion // num_heads,
+                               ngroups=ssd_ngroups, chunk_size=ssd_chunk_size,
+                               linear_attn_duality=linear_attn_duality, d_state=d_state, **kwargs)
+        self.drop_path = DropPath(
+            drop_path) if drop_path > 0. else nn.Identity()
+
+        self.cpe2 = nn.Conv2d(dim, dim, 3, padding=1, groups=dim)
+        self.norm2 = norm_layer(dim)
+        self.mlp = Mlp(in_features=dim, hidden_features=int(
+            dim * mlp_ratio), act_layer=act_layer, drop=drop)
+
+    def forward(self, x, H: int = 0, W: int = 0):
+        B, L, C = x.shape
+        if H * W == 0:
+            H, W = self.input_resolution
+            assert L == H * W, "input feature has wrong size"
+
+        x = x + self.cpe1(x.reshape(B, H, W, C).permute(0, 3,
+                          1, 2)).flatten(2).permute(0, 2, 1)
+        shortcut = x
+
+        x = self.norm1(x)
+
+        # SSD or Standard Attention
+        # print(x.shape, H, W)
+        x = self.attn(x, H, W)
+        x = shortcut + self.drop_path(x)
+        x = x + self.cpe2(x.reshape(B, H, W, C).permute(0, 3,
+                          1, 2)).flatten(2).permute(0, 2, 1)
+
+        # FFN
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        return x
+
+
+class BasicLayer(nn.Module):
+    """ A basic MLLA layer for one stage.
+
+    Args:
+        dim (int): Number of input channels.
+        input_resolution (tuple[int]): Input resolution.
+        depth (int): Number of blocks.
+        num_heads (int): Number of attention heads.
+        mlp_ratio (float): Ratio of mlp hidden dim to embedding dim.
+        qkv_bias (bool, optional): If True, add a learnable bias to query, key, value. Default: True
+        drop (float, optional): Dropout rate. Default: 0.0
+        drop_path (float | tuple[float], optional): Stochastic depth rate. Default: 0.0
+        norm_layer (nn.Module, optional): Normalization layer. Default: nn.LayerNorm
+        downsample (nn.Module | None, optional): Downsample layer at the end of the layer. Default: None
+        use_checkpoint (bool): Whether to use checkpointing to save memory. Default: False.
+    """
+
+    def __init__(self, dim, input_resolution, depth, num_heads, mlp_ratio=4., qkv_bias=True, drop=0.,
+                 drop_path=0., norm_layer=nn.LayerNorm, downsample=None, use_checkpoint=False,
+                 ssd_expansion=2, ssd_ngroups=1, ssd_chunk_size=256, linear_attn_duality=False, d_state=64, **kwargs):
+
+        super().__init__()
+        self.dim = dim
+        self.input_resolution = input_resolution
+        self.depth = depth
+        self.use_checkpoint = use_checkpoint
+
+        # build blocks
+        self.blocks = nn.ModuleList([
+            VMAMBA2Block(dim=dim,
+                         input_resolution=input_resolution,
+                         num_heads=num_heads,
+                         mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, drop=drop,
+                         drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path, norm_layer=norm_layer,
+                         ssd_expansion=ssd_expansion, ssd_ngroups=ssd_ngroups, ssd_chunk_size=ssd_chunk_size,
+                         linear_attn_duality=linear_attn_duality, d_state=d_state, **kwargs)
+            for i in range(depth)])
+
+        # patch merging layer
+        if downsample is not None:
+            self.downsample = downsample(input_resolution, dim=dim)
+        else:
+            self.downsample = None
+
+    def forward(self, x, H: int, W: int):
+        for blk in self.blocks:
+            x = blk(x, H, W)
+        if self.downsample is not None:
+            y = self.downsample(x, H, W)
+        else:
+            y = x
+        return x, y
+
+    def extra_repr(self) -> str:
+        return f"dim={self.dim}, input_resolution={self.input_resolution}, depth={self.depth}"
+
+
+class VMAMBA2(nn.Module):
+    def __init__(self, img_size=224, patch_size=4, in_chans=3, num_classes=1000,
+                 embed_dim=64, depths=[2, 4, 12, 4], num_heads=[2, 4, 8, 16],
+                 mlp_ratio=4., qkv_bias=True, drop_rate=0., drop_path_rate=0.2,
+                 norm_layer=nn.LayerNorm, use_checkpoint=False,
+                 ssd_expansion=2, ssd_ngroups=1, ssd_chunk_size=256,
+                 linear_attn_duality=True, d_state=64, **kwargs):
+        super().__init__()
+        self.num_classes = num_classes
+        self.num_layers = len(depths)
+        self.embed_dim = embed_dim
+        self.num_features = int(embed_dim * 2 ** (self.num_layers - 1))
+        self.mlp_ratio = mlp_ratio
+
+        self.simple_downsample = kwargs.get('simple_downsample', False)
+        self.simple_patch_embed = kwargs.get('simple_patch_embed', False)
+        self.attn_types = kwargs.get(
+            'attn_types', ['mamba2', 'mamba2', 'mamba2', 'standard'])
+        if self.simple_patch_embed:
+            self.patch_embed = SimpleStem(
+                img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
+        else:
+            self.patch_embed = Stem(
+                img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
+        if self.simple_downsample:
+            PatchMergingBlock = SimplePatchMerging
+        else:
+            PatchMergingBlock = PatchMerging
+        num_patches = self.patch_embed.num_patches
+        patches_resolution = self.patch_embed.patches_resolution
+        self.patches_resolution = patches_resolution
+
+        self.pos_drop = nn.Dropout(p=drop_rate)
+
+        # stochastic depth
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate,
+                                                sum(depths))]  # stochastic depth decay rule
+
+        # build layers
+        # self.layers = nn.ModuleList()
+        # for i_layer in range(self.num_layers):
+        #     kwargs['attn_type'] = self.attn_types[i_layer]
+        #     layer = BasicLayer(dim=int(embed_dim * 2 ** i_layer),
+        #                        input_resolution=(patches_resolution[0] // (2 ** i_layer),
+        #                                          patches_resolution[1] // (2 ** i_layer)),
+        #                        depth=depths[i_layer],
+        #                        num_heads=num_heads[i_layer],
+        #                        mlp_ratio=self.mlp_ratio,
+        #                        qkv_bias=qkv_bias, drop=drop_rate,
+        #                        drop_path=dpr[sum(depths[:i_layer]):sum(depths[:i_layer + 1])],
+        #                        norm_layer=norm_layer,
+        #                        downsample=PatchMergingBlock if (i_layer < self.num_layers - 1) else None,
+        #                        use_checkpoint=use_checkpoint,
+        #                        ssd_expansion=ssd_expansion,
+        #                        ssd_ngroups=ssd_ngroups,
+        #                        ssd_chunk_size=ssd_chunk_size,
+        #                        linear_attn_duality=linear_attn_duality,
+        #                        d_state=d_state,
+        #                        **kwargs)
+        #     self.layers.append(layer)
+
+        # del kwargs['attn_type']
+        self.layers = nn.ModuleList([BasicLayer(dim=int(embed_dim * 2 ** i_layer),
+                                                input_resolution=(patches_resolution[0] // (2 ** i_layer),
+                                                                  patches_resolution[1] // (2 ** i_layer)),
+                                                depth=depths[i_layer],
+                                                num_heads=num_heads[i_layer],
+                                                mlp_ratio=self.mlp_ratio,
+                                                qkv_bias=qkv_bias, drop=drop_rate,
+                                                drop_path=dpr[sum(depths[:i_layer]):sum(
+                                                    depths[:i_layer + 1])],
+                                                norm_layer=norm_layer,
+                                                downsample=PatchMergingBlock if (
+                                                    i_layer < self.num_layers - 1) else None,
+                                                use_checkpoint=use_checkpoint,
+                                                ssd_expansion=ssd_expansion,
+                                                ssd_ngroups=ssd_ngroups,
+                                                ssd_chunk_size=ssd_chunk_size,
+                                                linear_attn_duality=linear_attn_duality,
+                                                d_state=d_state,
+                                                attn_type=self.attn_types[i_layer],
+                                                **kwargs)
+                                     for i_layer in range(self.num_layers)
+                                     ])
+        self.norm = norm_layer(self.num_features)
+        self.avgpool = nn.AdaptiveAvgPool1d(1)
+        self.head = nn.Linear(
+            self.num_features, num_classes) if num_classes > 0 else nn.Identity()
+
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
+    @torch.jit.ignore
+    def no_weight_decay(self):
+        return {'absolute_pos_embed'}
+
+    def forward_features(self, x):
+        H, W = x.shape[-2:]
+        x = self.patch_embed(x)
+        H, W = H // 4, W // 4  # downsampled by patch_embed
+
+        x = self.pos_drop(x)
+        for layer in self.layers:
+            x = layer(x, H, W)
+            H, W = H // 2, W // 2  # downsampled by layer
+
+        x = self.norm(x)  # B L C
+        x = self.avgpool(x.transpose(1, 2))  # B C 1
+        x = torch.flatten(x, 1)
+        return x
+
+    def forward(self, x):
+        x = self.forward_features(x)
+        x = self.head(x)
+        return x
+
+
+class Backbone_VMAMBA2(VMAMBA2):
+    def __init__(self, out_indices=(0, 1, 2, 3), pretrained=None, **kwargs):
+        super().__init__(**kwargs)
+        norm_layer = nn.LayerNorm
+
+        self.out_indices = out_indices
+        self.norm_layers = nn.ModuleList(
+            [norm_layer(self.layers[i].dim)
+             for i in range(0, out_indices[-1] + 1)]
+        )
+        # self.layer_names = [f'norm{i}' for i in out_indices]
+        # for i in out_indices:
+        #     self.add_module(self.layer_names[i], norm_layer(self.layers[i].dim))
+
+        del self.head
+        del self.norm
+        del self.avgpool
+        self.load_pretrained(pretrained, key=kwargs.get('key', 'model'))
+
+    def load_pretrained(self, ckpt=None, key="model"):
+        if ckpt is None:
+            return
+        try:
+            _ckpt = torch.load(
+                open(ckpt, "rb"), map_location=torch.device("cpu"))
+            print(f"Successfully load ckpt {ckpt} from {key}")
+            incompatibleKeys = self.load_state_dict(_ckpt[key], strict=False)
+            print(incompatibleKeys)
+        except Exception as e:
+            print(f"Failed loading checkpoint form {ckpt}: {e}")
+
+    def forward(self, x) -> List[torch.Tensor]:
+        H, W = x.shape[-2:]
+        x = self.patch_embed(x)
+        if self.simple_patch_embed:
+            H, W = H // 4, W // 4
+        else:
+            H, W = int((H - 1) / 2) + 1, int((W - 1) / 2) + 1
+            H, W = int((H - 1) / 2) + 1, int((W - 1) / 2) + 1
+        outs = []
+
+        for i, (norm_layer, layer) in enumerate(zip(self.norm_layers, self.layers)):
+            o, x = layer(x, H, W)
+            if i in self.out_indices:
+                out = norm_layer(o)
+                B, L, C = out.shape
+                out = out.view(B, H, W, C).permute(0, 3, 1, 2)  # B, C, H, W
+                outs.append(out.contiguous())
+            # calculate H, W for next layer, with conv stride 3, stride 2 and padding 1
+            H, W = int((H - 1) / 2) + 1, int((W - 1) / 2) + 1
+
+        if len(self.out_indices) == 0:
+            return [x]
+
+        return outs
+
+
+class ChannelShuffle(nn.Module):
+    def __init__(self, groups):
+        super(ChannelShuffle, self).__init__()
+        self.groups = groups
+
+    def forward(self, x):
+        batchsize, num_channels, height, width = x.data.size()
+        channels_per_group = num_channels // self.groups
+        # reshape
+        x = x.view(batchsize, self.groups, channels_per_group, height, width)
+        x = torch.transpose(x, 1, 2).contiguous()
+        # flatten
+        x = x.view(batchsize, -1, height, width)
+        return x
+
+
+class VSSDSegHead(nn.Module):
+    def __init__(self, de_base_channels=128, out_channel=1, group=8):
+        super().__init__()
+        # 将vssd的输出通道数都改成 de_base_channels
+        self.up0 = nn.Sequential(nn.Conv2d(64, de_base_channels, 3, 1, 1), nn.AvgPool2d(2, 2))
+        self.up1 = nn.Sequential(nn.Conv2d(128, de_base_channels, 3, 1, 1), )
+        self.up2 = nn.Sequential(nn.Conv2d(256, de_base_channels, 3, 1, 1), nn.UpsamplingBilinear2d(scale_factor=2), )
+        self.up3 = nn.Sequential(nn.Conv2d(512, de_base_channels, 3, 1, 1), nn.UpsamplingBilinear2d(scale_factor=4), )
+
+        cs = [de_base_channels * 4 // (2 ** i) for i in range(4)]  # 共4个数
+
+        self.decode = nn.Sequential(
+            # ####################################### up1 #######################################
+            nn.ConvTranspose2d(cs[0], cs[1], 2, 2, groups=group),  # 2
+            ChannelShuffle(group),
+            nn.Conv2d(cs[1], cs[1],  3, 1, 1, groups=group),  # 4
+            ChannelShuffle(group),
+            nn.BatchNorm2d(cs[1]),
+            nn.ReLU(),
+            # ####################################### up2 #######################################
+            nn.ConvTranspose2d(cs[1], cs[2], 2, 2, groups=group),  # 1
+            ChannelShuffle(group),
+            nn.Conv2d(cs[2], cs[2], 3, 1, 1, groups=group),  # 4
+            ChannelShuffle(group),
+            nn.BatchNorm2d(cs[2]),
+            nn.ReLU(),
+            # ####################################### up3 #######################################
+            nn.ConvTranspose2d(cs[2], cs[3], 2, 2, groups=group),  # 1
+            ChannelShuffle(group),
+            nn.Conv2d(cs[3], cs[3],  3, 1, 1, groups=group),  # 4
+            ChannelShuffle(group),
+            nn.BatchNorm2d(cs[3]),
+            nn.ReLU(),
+            # ####################################### output #######################################
+            nn.Conv2d(cs[3], out_channel, 1, 1, 0, ),
+        )
+
+    def forward(self, features:List[torch.Tensor]):
+        # 提取特征层
+        en0 = self.up0(features[0])
+        en1 = self.up1(features[1])
+        en2 = self.up2(features[2])
+        en3 = self.up3(features[3])
+        en = torch.cat([en0, en1, en2, en3], dim=1)
+
+        # 解码
+        return self.decode(en)
+
+class AdaptiveMaxPool2d(nn.Module):
+    def __init__(self, output_size):
+        super().__init__()
+        self.output_size = output_size
+
+    def forward(self, x):
+        b, c, H, W = x.shape
+        h, w = self.output_size
+
+        # 将输入张量分块
+        x = x.view(b, c, h, H//h, w, W//w)
+
+        # 在每个块内执行最大池化
+        x = x.max(dim=3)[0].max(dim=4)[0]
+        return x
+    
+class AdaptiveAvgPool2d(nn.Module):
+    def __init__(self, output_size):
+        super().__init__()
+        self.output_size = output_size
+
+    def forward(self, x):
+        b, c, H, W = x.shape
+        h, w = self.output_size
+
+        # 将输入张量分块
+        x = x.view(b, c, h, H//h, w, W//w)
+
+        # 在每个块内执行平均池化
+        x = x.mean(dim=3).mean(dim=4)
+        return x
+        
+
+
+class VSSDClsHead(nn.Module):
+    def __init__(self, de_base_channels=128, out_channel=1, group=8):
+        super().__init__()
+
+        # 将vssd的输出通道数都改成 de_base_channels
+        self.down0 = nn.Sequential(AdaptiveMaxPool2d((4,4)), nn.Conv2d(64,  de_base_channels, 3, 1, 1) )
+        self.down1 = nn.Sequential(AdaptiveMaxPool2d((4,4)), nn.Conv2d(128, de_base_channels, 3, 1, 1) )
+        self.down2 = nn.Sequential(AdaptiveMaxPool2d((4,4)), nn.Conv2d(256, de_base_channels, 3, 1, 1) )
+        self.down3 = nn.Sequential(AdaptiveMaxPool2d((4,4)), nn.Conv2d(512, de_base_channels, 3, 1, 1) )
+
+        cs = [de_base_channels * 4 * (i + 1) for i in range(4)]  # 共4个数
+        self.decode = nn.Sequential(
+            # ####################################### down1 #######################################
+            nn.Conv2d(cs[0], cs[1], 3, 2, 1, groups=group),  # 2
+            ChannelShuffle(group),
+            nn.Conv2d(cs[1], cs[1],  3, 1, 1, groups=group),  # 4
+            ChannelShuffle(group),
+            nn.BatchNorm2d(cs[1]),
+            nn.ReLU(),
+            # ####################################### down2 #######################################
+            nn.Conv2d(cs[1], cs[2], 3, 2, 1, groups=group),  # 1
+            ChannelShuffle(group),
+            nn.Conv2d(cs[2], cs[3], 3, 1, 1, groups=group),  # 4
+            ChannelShuffle(group),
+            nn.BatchNorm2d(cs[3]),
+            nn.ReLU(),
+            # ####################################### output #######################################
+            nn.Flatten(1),
+            nn.Linear(cs[3], out_channel),
+        )
+
+    def forward(self, features:List[torch.Tensor]):
+        en0 = self.down0(features[0])
+        en1 = self.down1(features[1])
+        en2 = self.down2(features[2])
+        en3 = self.down3(features[3])
+        en = torch.cat([en0, en1, en2, en3], dim=1)
+        # 解码
+        return self.decode(en)
+
+
+class SegVSSD(nn.Module):
+    def __init__(self, fact=(2, 2), in_chans=3, out_channel=1, group=8):
+        super().__init__()
+
+        self.features = []
+        self.dw = -1
+        self.dh = -1
+
+        self.fw = fact[0]
+        self.fh = fact[1]
+
+        self.vssd = Backbone_VMAMBA2(in_chans=in_chans * fact[0] * fact[1],
+                                     linear_attn_duality=True,
+                                     ssd_chunk_size=32)
+
+        self.head = VSSDSegHead(128, out_channel * fact[0] * fact[1], group=group)
+
+    def forward(self, x):
+        b, c, H, W = x.shape
+        h, fh = H // self.fh,  self.fh
+        w, fw = W // self.fw,  self.fw
+        x = x.reshape(b, c, h, fh, w, fw).permute(0, 1, 3, 5, 2, 4).reshape(b, c*fh*fw, h, w)
+        y = self.head(self.vssd(x))
+        y = y.reshape(b, -1, fh, fw, h, w) .permute(0, 1, 4, 2, 5, 3).reshape(b, -1, H, W)
+        return y
+
+
+class ClsVSSD(nn.Module):
+    def __init__(self, fact=(2, 2), in_chans=3, out_channel=1,group=8):
+        super().__init__()
+
+        self.features = []
+        self.dw = -1
+        self.dh = -1
+
+        self.fw = fact[0]
+        self.fh = fact[1]
+
+        self.vssd = Backbone_VMAMBA2(in_chans=in_chans * fact[0] * fact[1],
+                                     linear_attn_duality=True,
+                                     ssd_chunk_size=32)
+        self.head = VSSDClsHead(256, out_channel, group=group)
+
+    def forward(self, x):
+        b, c, H, W = x.shape
+        h, fh = H // self.fh,  self.fh
+        w, fw = W // self.fw,  self.fw
+        x = x.reshape(b, c, h, fh, w, fw).permute(0, 1, 3, 5, 2, 4).reshape(b, c*fh*fw, h, w)
+        y = self.head(self.vssd(x))
+        return y
+
+
+if __name__ == '__main__':
+    # from ptflops import get_model_complexity_info
+    # 测试
+    seg = SegVSSD(fact=(2, 2), in_chans=3, out_channel=2).cuda()
+    cls = ClsVSSD(fact=(2, 2), in_chans=3, out_channel=1024).cuda() 
+
+    # 通用的多维度双向mamba2
+    from analysis_tools import (
+        export_jit_script,
+        export_onnx,
+        statistics,
+        test_run,
+    )
+    seg.eval()
+    cls.eval()
+    x = torch.randn(1, 3, 256, 256).cuda()
+
+    export_jit_script(seg)
+    export_onnx(seg, x)
+    test_run(seg, x)
+    statistics(seg, tuple(x.shape[1:]))
+
+    export_jit_script(cls)
+    export_onnx(cls, x)
+    test_run(cls, x)
+    statistics(cls, tuple(x.shape[1:]))
