@@ -33,6 +33,12 @@
 - ✅ 兼容ex_vssd.py中的所有特点
 - ❌ 不支持1d、3d等其他维度的数据格式
 
+## [ex_vssd_cls_seg.py](torchnssd/ex_vssd_cls_seg.py)新特性（更新时间：2024/08/28） 
+- ✅ 支持分割任务（添加了基于vssd backbone的shuffle分割解码器）
+- ✅ 支持分类任务（添加了基于vssd backbone的shuffle分类解码器）
+- ✅ 支持导出为scipt及onnx格式 
+- ❌ 不支持1d、3d等其他维度的数据格式
+
 ## 提示
 *如果你想要更快的速度，可以将本项目中的Mamba2替换为Mamba2官方的Cuda加速实现，并按照官方要求安装各种依赖包，这不会影响本项目对多维度数据的支持，但会对模型的导出产生影响*
  

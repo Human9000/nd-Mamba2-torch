@@ -36,6 +36,12 @@ BiMamba2, implemented solely using PyTorch, provides N-dimensional support, incl
 -  ✅  Support exporting to scientific and onnx formats
 -  ✅  Compatible with all features in ex-vssd.py
 -  ❌  Not supporting data formats such as 1d, 3d, and other dimensions
+ 
+## [ex_vssd_cls_seg.py](torchnssd/ex_vssd_cls_seg.py) New feature (updated on August 28, 2024)
+-  ✅  Support for segmentation tasks (added vssd backbone based shuffle segmentation decoder)
+-  ✅  Support classification tasks (added vssd backbone based shuffle classification decoder)
+-  ✅  Support exporting to scientific and onnx formats
+-  ❌  Not supporting data formats such as 1d, 3d, and other dimensions
 
 ## Reminder
 *If you want faster speed, you can replace Mamba2 in this project with Mamba2's official Cuda acceleration implementation and install various dependency packages according to official requirements. This will not affect the project's support for multi-dimensional data, but it will have an impact on the export of the model*
