@@ -1,10 +1,8 @@
 # Nd-Mamba2 for any dimension by pytorch
 BiMamba2, implemented solely using PyTorch, provides N-dimensional support, including support for 1d, 2d, and 3d data. With BiMamba2, you can easily stitch it into any model to improve accuracy.
 
-[![DOI](https://zenodo.org/badge/837076504.svg)](https://doi.org/10.5281/zenodo.14185321)
-```bash
-Liu H. nd-Mamba2-torch: Implementation of Nd-Mamba2 for any dimension [EB/OL]. (2024-11-19)[2024-11-19]. https://doi.org/10.5281/zenodo.14185321. 
-```
+[![DOI](https://zenodo.org/badge/837076504.svg)](https://doi.org/10.5281/zenodo.14185321) 
+
 [中文README](README_中文.md)
  
 ![结构](img.png)
@@ -54,4 +52,21 @@ Liu H. nd-Mamba2-torch: Implementation of Nd-Mamba2 for any dimension [EB/OL]. (
 * [Albert Gu], [Tri Dao] [state-spaces/mamba]( https://github.com/state-spaces/mamba ) - authors of the Mamba-2 architecture
 * [Yuheng Shi], [Minjing Dong] [YuHengsss/VSSD]( https://github.com/YuHengsss/VSSD ) - authors of the vssd architecture
 * [Thomas] - author of [tommyip/mamba2-minimal]( https://github.com/tommyip/mamba2-minimal ),  who inspired this repo
- 
+
+
+## Citation
+
+If nd-mamba2-torch is helpful for your research, please cite the following paper: 
+```
+ @misc{nd-mamba2-torch,
+  title={nd-Mamba2-torch: Implementation of Nd-Mamba2 for any dimension},
+  author={Liu, Hao},
+  year={2024},
+  howpublished={\url{https://github.com/Human9000/nd-Mamba2-torch}},
+  note={Accessed: 2024-11-19},
+  doi={10.5281/zenodo.14185321}
+}
+```
+```
+Liu H. nd-Mamba2-torch: Implementation of Nd-Mamba2 for any dimension [EB/OL]. (2024-11-19)[2024-11-19]. https://doi.org/10.5281/zenodo.14185321. 
+```
