@@ -1,6 +1,12 @@
 # Nd-Mamba2 for any dimension by pytorch
 BiMamba2, implemented solely using PyTorch, provides N-dimensional support, including support for 1d, 2d, and 3d data. With BiMamba2, you can easily stitch it into any model to improve accuracy.
 
+![Mamba](assets/selection.png "Selective State Space")
+> **Nd-BiMamba2: A Unified Bidirectional Architecture for Multi-Dimensional Data Processing**\
+> Hao Liu*\
+> Paper: [https://arxiv.org/abs/2312.00752](https://arxiv.org/abs/2411.15380)
+ 
+[![DOI](https://zenodo.org/badge/837076504.svg)](https://doi.org/10.48550/arXiv.2411.15380)
 [![DOI](https://zenodo.org/badge/837076504.svg)](https://doi.org/10.5281/zenodo.14185321) 
 
 [中文README](README_中文.md)
@@ -58,15 +64,13 @@ BiMamba2, implemented solely using PyTorch, provides N-dimensional support, incl
 
 If nd-mamba2-torch is helpful for your research, please cite the following paper: 
 ```
- @misc{nd-mamba2-torch,
-  title={nd-Mamba2-torch: Implementation of Nd-Mamba2 for any dimension},
-  author={Liu, Hao},
-  year={2024},
-  howpublished={\url{https://github.com/Human9000/nd-Mamba2-torch}},
-  note={Accessed: 2024-11-19},
-  doi={10.5281/zenodo.14185321}
+@misc{liu2024ndbimamba2unifiedbidirectionalarchitecture,
+      title={Nd-BiMamba2: A Unified Bidirectional Architecture for Multi-Dimensional Data Processing}, 
+      author={Hao Liu},
+      year={2024},
+      eprint={2411.15380},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2411.15380}, 
 }
-```
-```
-Liu H. nd-Mamba2-torch: Implementation of Nd-Mamba2 for any dimension [EB/OL]. (2024-11-19)[2024-11-19]. https://doi.org/10.5281/zenodo.14185321. 
 ```
