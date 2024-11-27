@@ -1,5 +1,13 @@
 # Nd-Mamba2 for any dimension by pytorch
 仅使用PyTorch实现的双向Mamba2（BiMamba2）提供N维度支持，包括1d，2d，3d数据的支持，借助BiMamba2你可以很方便的缝合到任意模型中去提高精度。
+
+下面的文章详细介绍了该项目Nd-Bimamba2模块：
+> **Nd-BiMamba2: A Unified Bidirectional Architecture for Multi-Dimensional Data Processing**\
+> Hao Liu*\
+> Paper: [https://arxiv.org/abs/2312.00752](https://arxiv.org/abs/2411.15380)
+ 
+[![DOI](https://zenodo.org/badge/837076504.svg)](https://doi.org/10.48550/arXiv.2411.15380)
+[![DOI](https://zenodo.org/badge/837076504.svg)](https://doi.org/10.5281/zenodo.14185321) 
  
 ![结构](img.png)
 
@@ -47,4 +55,20 @@
 * [Albert Gu], [Tri Dao] [state-spaces/mamba](https://github.com/state-spaces/mamba) - authors of the Mamba-2 architecture
 * [Yuheng Shi], [Minjing Dong] [YuHengsss/VSSD](https://github.com/YuHengsss/VSSD) - authors of the vssd architecture
 * [Thomas] - author of [tommyip/mamba2-minimal](https://github.com/tommyip/mamba2-minimal), who inspired this repo
+
+
   
+
+## 引用
+```
+@misc{liu2024ndbimamba2unifiedbidirectionalarchitecture,
+      title={Nd-BiMamba2: A Unified Bidirectional Architecture for Multi-Dimensional Data Processing}, 
+      author={Hao Liu},
+      year={2024},
+      eprint={2411.15380},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2411.15380}, 
+}
+```
+
