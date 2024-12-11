@@ -558,8 +558,7 @@ class Mamba2(nn.Module):
 
         return x
 
-    def forward(self, u, H: int, W: int):
-        return u
+    def forward(self, u, H: int, W: int): 
         """
         u: (B,C,H,W)
         Returns: same shape as u

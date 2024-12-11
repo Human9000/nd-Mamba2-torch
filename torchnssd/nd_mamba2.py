@@ -38,8 +38,8 @@ class Mamba2Config:
         self.nheads = self.d_inner // self.headdim
         if self.vocab_size % self.pad_vocab_size_multiple != 0:
             self.vocab_size += (
-                    self.pad_vocab_size_multiple
-                    - self.vocab_size % self.pad_vocab_size_multiple
+                self.pad_vocab_size_multiple
+                - self.vocab_size % self.pad_vocab_size_multiple
             )
 
 
@@ -70,7 +70,8 @@ class Mamba2(nn.Module):
                  vocab_size: int = 50277,
                  pad_vocab_size_multiple: int = 16, ):
         super().__init__()
-        args = Mamba2Config(d_model, n_layer, d_state, d_conv, expand, headdim, chunk_size, vocab_size, pad_vocab_size_multiple)
+        args = Mamba2Config(d_model, n_layer, d_state, d_conv, expand,
+                            headdim, chunk_size, vocab_size, pad_vocab_size_multiple)
         self.args = args
         # Order: (z, x, B, C, dt)
         d_in_proj = 2 * args.d_inner + 2 * args.d_state + args.nheads
@@ -119,14 +120,17 @@ class Mamba2(nn.Module):
 
         # Pad or truncate xBC seqlen to d_conv
         conv_state = F.pad(
-            rearrange(xBC, "b l d -> b d l"), (self.args.d_conv - u.shape[1], 0)
+            rearrange(
+                xBC, "b l d -> b d l"), (self.args.d_conv - u.shape[1], 0)
         )
 
         xBC = silu(
-            self.conv1d(xBC.transpose(1, 2)).transpose(1, 2)[:, : u.shape[1], :]
+            self.conv1d(xBC.transpose(1, 2)).transpose(
+                1, 2)[:, : u.shape[1], :]
         )  # (batch, seqlen, d_inner + 2 * d_state))
         x, B, C = torch.split(
-            xBC, [self.args.d_inner, self.args.d_state, self.args.d_state], dim=-1
+            xBC, [self.args.d_inner, self.args.d_state,
+                  self.args.d_state], dim=-1
         )
         x = rearrange(x, "b l (h p) -> b l h p", p=self.args.headdim)
         y, ssm_state = ssd(
@@ -187,7 +191,8 @@ class Mamba2(nn.Module):
         xBC = silu(xBC)
 
         x, B, C = torch.split(
-            xBC, [self.args.d_inner, self.args.d_state, self.args.d_state], dim=-1
+            xBC, [self.args.d_inner, self.args.d_state,
+                  self.args.d_state], dim=-1
         )
         A = -torch.exp(self.A_log)  # (nheads,)
 
@@ -215,10 +220,12 @@ def segsum(x: Tensor, device: Device = None) -> Tensor:
     """
     T = x.size(-1)
     x = repeat(x, "... d -> ... d e", e=T)
-    mask = torch.tril(torch.ones(T, T, dtype=torch.bool, device=device), diagonal=-1)
+    mask = torch.tril(torch.ones(T, T, dtype=torch.bool,
+                      device=device), diagonal=-1)
     x = x.masked_fill(~mask, 0)
     x_segsum = torch.cumsum(x, dim=-2)
-    mask = torch.tril(torch.ones(T, T, dtype=torch.bool, device=device), diagonal=0)
+    mask = torch.tril(torch.ones(
+        T, T, dtype=torch.bool, device=device), diagonal=0)
     x_segsum = x_segsum.masked_fill(~mask, -torch.inf)
     return x_segsum
 
@@ -267,14 +274,16 @@ def ssd(x, A, B, C, chunk_size, initial_states=None, device: Device = None):
     if initial_states is None:
         initial_states = torch.zeros_like(states[:, :1])
     states = torch.cat([initial_states, states], dim=1)
-    decay_chunk = torch.exp(segsum(F.pad(A_cumsum[:, :, :, -1], (1, 0)), device=device))
+    decay_chunk = torch.exp(
+        segsum(F.pad(A_cumsum[:, :, :, -1], (1, 0)), device=device))
     new_states = torch.einsum("bhzc, bchpn -> bzhpn", decay_chunk, states)
     states, final_state = new_states[:, :-1], new_states[:, -1]
 
     # 4. Compute state -> output conversion per chunk
     # (left term of low-rank factorization of off-diagonal blocks; C terms)
     state_decay_out = torch.exp(A_cumsum)
-    Y_off = torch.einsum("bclhn, bchpn, bhcl -> bclhp", C, states, state_decay_out)
+    Y_off = torch.einsum("bclhn, bchpn, bhcl -> bclhp",
+                         C, states, state_decay_out)
 
     # Add output of intra-chunk and inter-chunk terms (diagonal and off-diagonal blocks)
     Y = rearrange(Y_diag + Y_off, "b c l h p -> b (c l) h p")
@@ -305,8 +314,9 @@ def silu(x):
     """
     return x * F.sigmoid(x)
 
+
 class BaseNdMamba2(nn.Module):
-    def __init__(self, cin, cout, mamba_dim, **mamba2_args):
+    def __init__(self, cin,  cout, mamba_dim, **mamba2_args):
         super().__init__()
         assert mamba_dim % 64 == 0, "cmid 必须是64的倍数"
         self.fc_in = nn.Linear(cin, mamba_dim, bias=False)  # 调整通道数到cmid
@@ -316,12 +326,13 @@ class BaseNdMamba2(nn.Module):
 
 
 class NdMamba2_1d(BaseNdMamba2):
-    def __init__(self, cin, cmid, cout, **mamba2_args):
-        super().__init__(cin, cmid, cout, **mamba2_args)
+    def __init__(self, cin, cout, cmid,  **mamba2_args):
+        super().__init__(cin, cout, cmid, **mamba2_args)
 
     def forward(self, x):
         l = x.shape[2]
-        x = F.pad(x, (0, (64 - x.shape[2] % 64) % 64))  # 将 l , pad到4的倍数, [b, c64,l4]
+        # 将 l , pad到4的倍数, [b, c64,l4]
+        x = F.pad(x, (0, (64 - x.shape[2] % 64) % 64))
         x = rearrange(x, 'b c l-> b l c')  # 转成 1d 信号 [b, d4*w4*h4, c64]
         x = self.fc_in(x)  # 调整通道数为目标通道数
         x1, h1 = self.mamba2_for(x)
@@ -335,8 +346,8 @@ class NdMamba2_1d(BaseNdMamba2):
 
 
 class NdMamba2_2d(BaseNdMamba2):
-    def __init__(self, cin,  cout,mamba_dim, **mamba2_args):
-        super().__init__(cin, cout, mamba_dim, **mamba2_args)
+    def __init__(self, cin, mamba_dim, cout, **mamba2_args):
+        super().__init__(cin, mamba_dim, cout, **mamba2_args)
 
     def forward(self, x):
         h, w = x.shape[2:]
@@ -351,16 +362,15 @@ class NdMamba2_2d(BaseNdMamba2):
         x2 = x2.flip(1)
         x = x1 + x2
         x = self.fc_out(x)  # 调整通道数为目标通道数
-        x = rearrange(x, 'b (h w) c -> b c h w', h=h8)  # 转成 2d 图片[b, w8*h8, c64]
+        # 转成 2d 图片[b, w8*h8, c64]
+        x = rearrange(x, 'b (h w) c -> b c h w', h=h8)
         x = x[:, :, :h, :w]  # 截取原图大小
         return x
 
 
 class NdMamba2_3d(BaseNdMamba2):
-    def __init__(self, cin,  cout,mamba_dim, **mamba2_args):
-        super().__init__(cin, cout, mamba_dim, **mamba2_args)
-
-
+    def __init__(self, cin,  mamba_dim, cout, **mamba2_args):
+        super().__init__(cin, mamba_dim, cout, **mamba2_args)
 
     def forward(self, x):
         d, h, w = x.shape[2:]
@@ -369,14 +379,16 @@ class NdMamba2_3d(BaseNdMamba2):
                       0, (4 - x.shape[2] % 4) % 4)
                   )  # 将 d, h, w , pad到4的倍数, [b, c64,d4, h4, w4]
         d4, h4, w4 = x.shape[2:]
-        x = rearrange(x, 'b c d h w -> b (d h w) c')  # 转成 1d 信号 [b, d4*w4*h4, c64]
+        # 转成 1d 信号 [b, d4*w4*h4, c64]
+        x = rearrange(x, 'b c d h w -> b (d h w) c')
         x = self.fc_in(x)  # 调整通道数为目标通道数
         x1, h1 = self.mamba2_for(x)
         x2, h2 = self.mamba2_back(x.flip(1))
         x2 = x2.flip(1)
         x = x1 + x2
         x = self.fc_out(x)  # 调整通道数为目标通道数
-        x = rearrange(x, 'b (d h w) c -> b c d h w', d=d4, h=h4, w=w4)  # 转成 2d 图片[b, d4*w4*h4, c64]
+        x = rearrange(x, 'b (d h w) c -> b c d h w', d=d4,
+                      h=h4, w=w4)  # 转成 2d 图片[b, d4*w4*h4, c64]
         x = x[:, :, :d, :h, :w]  # 截取原图大小
         return x
 
@@ -385,12 +397,12 @@ class NdMamba2(BaseNdMamba2):
     def __init__(self, cin,  cout, mamba_dim, **mamba2_args):
         super().__init__(cin, cout, mamba_dim, **mamba2_args)
 
-
     def forward(self, x):
         size = x.shape[2:]
         x = torch.flatten(x, 2)  # b c size
         l = x.shape[2]
-        x = F.pad(x, (0, (64 - x.shape[2] % 64) % 64))  # 将 l , pad到4的倍数, [b, c64,l4]
+        # 将 l , pad到4的倍数, [b, c64,l4]
+        x = F.pad(x, (0, (64 - x.shape[2] % 64) % 64))
         x = rearrange(x, 'b c l-> b l c')  # 转成 1d 信号 [b, d4*w4*h4, c64]
         x = self.fc_in(x)  # 调整通道数为目标通道数
         x1, h1 = self.mamba2_for(x)
@@ -403,20 +415,21 @@ class NdMamba2(BaseNdMamba2):
         x = torch.unflatten(x, 2, size)
         return x
 
+
 if __name__ == '__main__':
     # 通用的多维度双向mamba2
-    net_n = NdMamba2(64, 128, 64).cuda()
+    net_n = NdMamba2(64, 64, 128, ).cuda()
 
     # 定制的双向mamba2 1d, 2d, 3d
-    net1 = NdMamba2_1d(64, 128, 64).cuda()
-    net2 = NdMamba2_2d(64, 128, 64).cuda()
-    net3 = NdMamba2_3d(64, 128, 64).cuda()
+    net1 = NdMamba2_1d(64,  64,128,).cuda()
+    net2 = NdMamba2_2d(64,  64,128,).cuda()
+    net3 = NdMamba2_3d(64,  64,128,).cuda()
 
     # 多维度数据
-    x1 = torch.randn(1, 64, 32).cuda() # 1d
-    x2 = torch.randn(1, 64, 32, 77).cuda() # 2d
-    x3 = torch.randn(1, 64, 32, 77, 25).cuda() # 3d
-    x4 = torch.randn(1, 64, 12, 17, 15, 15).cuda() # 4d
+    x1 = torch.randn(1, 64, 32).cuda()  # 1d
+    x2 = torch.randn(1, 64, 32, 77).cuda()  # 2d
+    x3 = torch.randn(1, 64, 32, 77, 25).cuda()  # 3d
+    x4 = torch.randn(1, 64, 12, 17, 15, 15).cuda()  # 4d
 
     # 测试
     y1 = net_n(x1)
@@ -428,11 +441,9 @@ if __name__ == '__main__':
     y4 = net_n(x4)
     print(y4.shape)
 
-
     y1 = net1(x1)
     print(y1.shape)
     y2 = net2(x2)
     print(y2.shape)
     y3 = net3(x3)
     print(y3.shape)
-
